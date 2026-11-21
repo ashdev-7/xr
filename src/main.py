@@ -30,13 +30,13 @@ from array import array
 
 # ----------------------------------------------------------------------------- parameters
 P = dict(
-    bin_dt=0.02,        # attitude/preintegration bin [s]
+    bin_dt=0.04,        # attitude/preintegration bin [s] (25 Hz: -24 % runtime, -28 % heap for ~0.3 % ATE)
     knot_dt=0.1,        # translation smoother step [s]
     # attitude
     tilt_sig=0.5,       # gravity-direction measurement noise per update [rad]
     tilt_k=4.0,         # extra tilt noise per | |f| - g | [rad per m/s^2]
     tilt_gate=3.0,      # skip gravity update if | |f| - g | exceeds this [m/s^2]
-    tilt_every=2,       # gravity update every N bins
+    tilt_every=1,       # gravity update every N bins
     gyro_floor=2e-3,    # minimum gyro white noise per sample [rad/s]
     bg_rw=2e-5,         # base gyro bias random walk [rad/s/sqrt(s)]
     bg_k=0.002,         # extra gyro bias RW per unit severity [rad/s/sqrt(s)] (script: 6e-4 aware, ~1e-3..1e-2 as-is)
@@ -152,7 +152,9 @@ def survey(opener, nmax=4000):
                 if header is None and rows == 0:
                     header = s
                 continue
-            parts = s.replace(" ", "").replace("\t", "").split(",")
+            if " " in s or "\t" in s:
+                s = s.replace(" ", "").replace("\t", "")
+            parts = s.split(",")
             try:
                 ti, tf = parse_ts(parts[0])
             except ValueError:
@@ -228,6 +230,7 @@ def ingest(opener, info):
     st = dict(rows=0, nan=0, dead=0, frozen=0, spikes=0, valid=0)
     buf = []
     sig_g, sig_a = 0.01, 0.1
+    lo_dt, hi_dt = 0.5 * dt_nom, 1.5 * dt_nom
 
     def emit(r):
         tt = r[0]
@@ -243,10 +246,12 @@ def ingest(opener, info):
         while len(ws) <= 13 * k:
             ws.extend((0.0,) * 13)
         o = 13 * k
+        _, g0, g1, g2, a0, a1, a2 = r
         ws[o] += 1.0
-        for c in range(3):
-            x, y = r[1 + c], r[4 + c]
-            ws[o + 1 + c] += x; ws[o + 4 + c] += x * x; ws[o + 7 + c] += y; ws[o + 10 + c] += y * y
+        ws[o + 1] += g0; ws[o + 2] += g1; ws[o + 3] += g2
+        ws[o + 4] += g0 * g0; ws[o + 5] += g1 * g1; ws[o + 6] += g2 * g2
+        ws[o + 7] += a0; ws[o + 8] += a1; ws[o + 9] += a2
+        ws[o + 10] += a0 * a0; ws[o + 11] += a1 * a1; ws[o + 12] += a2 * a2
         st["valid"] += 1
 
     def spike(i):
@@ -263,7 +268,9 @@ def ingest(opener, info):
             s = line.strip()
             if not s or not (s[0].isdigit() or s[0] in "+-."):
                 continue
-            parts = s.replace(" ", "").replace("\t", "").split(",")
+            if " " in s or "\t" in s:
+                s = s.replace(" ", "").replace("\t", "")
+            parts = s.split(",")
             try:
                 ti, tf = parse_ts(parts[0])
             except ValueError:
@@ -306,11 +313,9 @@ def ingest(opener, info):
             t_last_valid = t
             if p1 is not None and p2 is not None:  # second differences for the noise meter
                 d1, d2 = t - p1[0], p1[0] - p2[0]
-                if 0.5 * dt_nom < d1 < 1.5 * dt_nom and 0.5 * dt_nom < d2 < 1.5 * dt_nom:
-                    for c in (1, 2, 3):
-                        bg.append(abs(r[c] - 2 * p1[c] + p2[c]))
-                    for c in (4, 5, 6):
-                        ba.append(abs(r[c] - 2 * p1[c] + p2[c]))
+                if lo_dt < d1 < hi_dt and lo_dt < d2 < hi_dt:
+                    bg.extend((abs(r[1] - 2 * p1[1] + p2[1]), abs(r[2] - 2 * p1[2] + p2[2]), abs(r[3] - 2 * p1[3] + p2[3])))
+                    ba.extend((abs(r[4] - 2 * p1[4] + p2[4]), abs(r[5] - 2 * p1[5] + p2[5]), abs(r[6] - 2 * p1[6] + p2[6])))
             p2, p1 = p1, r
             if not repair:
                 emit(r)

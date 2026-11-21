@@ -294,3 +294,15 @@ Official-only data unchanged (1.729 -> 1.729).
 Fix 2: separate accel uncertainty inside gaps (sig_gap_in) from the blind window (sig_gap). Chosen on TRAIN:
 with gaps ATE 2.092 -> 2.026, DROP 2.101 -> 1.999; official ATE 1.696 -> 1.693, BLIND unchanged 1.315.
 Held-out confirmation: with gaps ATE 1.917, DROP 1.974 (stand-still 2.491 / 2.525); official 1.726.
+
+## 2026-11-22 — efficiency (40 of 100 points: peak memory 20, runtime 20)
+measure.py fixed: timing came from the tracemalloc run (~30x slowdown, reported 187 ms/s); now memory from one
+traced run, time = median CPU of 3 untraced runs.
+25 Hz attitude bins (bin_dt 0.04, gravity update every bin) instead of 50 Hz / every 2nd: MH_02 6.04 -> 4.59 ms/s,
+estimator heap 1.83 -> 1.31 MB. Accuracy TRAIN official ATE 1.693 -> 1.698, held-out 1.726 -> 1.726 (blind
+1.715 -> 1.729; with 2 s gaps 1.917 -> 1.921). Kept.
+Ingest micro-optimizations (unrolled 0.5 s moments and second differences, no string replace when the row has no
+whitespace): output bit-identical on MH_02 aware and room4 asis; ~4.6-5.1 ms/s (run-to-run noise +-0.3).
+Total traced peak including CPython's compile of main.py: 7.78 MB, of which compile ~6.8 MB (transient, scales
+with file size; half the file 2.6 MB). Not changed: splitting into modules would cut it to ~2.5 MB only if the
+organizers trace compilation, and the FAQ says data structures/buffers are measured.
