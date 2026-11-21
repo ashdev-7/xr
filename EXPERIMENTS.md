@@ -272,3 +272,13 @@ Learned speed (ridge on 8 heading-independent 1 s features of the degraded IMU, 
 degradation variants per flight; criteria fixed before running: r >= 0.6, RMSE <= 35 % / 25 % of mean):
 drone mean r 0.22 (3 of 5 flights worse than a constant), handheld mean r 0.47 (RMSE 41-54 %) -> rejected.
 The literature trains speed models on 30 min - 60 h; 5 drone / 3 handheld flights are not enough.
+
+## 2026-11-22 — full-text review follow-ups (reports/IMU odometry full text review.md, plan items 1 and 6)
+Per-flight GT-fitted drag coefficient (ceiling for any online mu estimator), aware seed 42, ATE:
+MH_01 3.460 -> 3.511, MH_03 1.929 -> 2.001, MH_05 3.751 -> 3.883, V1_01 1.368 -> 1.415, V2_02 1.378 -> 1.375.
+Negative ceiling: online mu estimation dropped.
+Component switch-off (drone TRAIN, 2 scen, seed 42), ATE / BLIND: baseline 2.464 / 1.746; bias RW x0.2
+2.517 / 1.959; centre RW 0.01 2.478; centre RW 0.5 4.649 / 7.694; velocity prior off (sig_v_h 20) 2.450 / 1.725;
+workspace prior off (sig_p_h 100, sig_c 0.5) 5.914 / 10.381. The high-pass is the workspace/centre prior, and
+it is the same component that stops drift: slow motion and drift are not separable from the IMU here.
+Not run: noisy-speed oracle (moot after the learned speed model reached r = 0.22 / 0.47).
