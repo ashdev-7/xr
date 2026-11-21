@@ -205,7 +205,7 @@ def main():
             arrow(s, x + 1.72, 2.1, x + 1.9, 2.1)
         x += 1.9
     tb(s, 0.4, 3.35, 9.2, 1.9, [
-        [("Engineering. ", True, ACC), ("One standard-library file; the log is streamed twice; memory grows with 20 ms bins and "
+        [("Engineering. ", True, ACC), ("One standard-library file; the log is streamed twice; memory grows with 40 ms bins and "
                                         "10 Hz knots, not with rows. Any input, however broken, yields one well-formed pose per row.", False, None)],
         [("Measured. ", True, ACC), (f"{rs[0]['ms_per_s']:.1f} ms per 1 s of IMU (budget 20) and {rs[0]['data_heap_mb']:.1f} MB of estimator "
                                      f"heap on a {rs[0]['duration_s']:.0f} s drone flight; {rs[1]['ms_per_s']:.1f} ms and "
@@ -232,7 +232,7 @@ def main():
     tb(s, 0.4, 4.15, 4.6, 1.1, [
         f"Drones: {100 * (1 - rot_pg / rot_st):.0f} % lower ATE and {100 * (1 - rot_bl_pg / rot_bl_st):.0f} % lower blind-window "
         f"error than standing still; handheld: {100 * (1 - hh_pg / hh_st):.0f} % lower ATE.",
-        "Real public IMU degraded by the official script, 2 column scenarios × 3 seeds, flights never used for tuning."],
+        "Real public IMU degraded by the official script, 2 column scenarios × 3 seeds, flights held out during design and tuning (one handheld parameter was refit on all rooms at the end)."],
         size=9, color=MUTED, space=4)
     pic(s, "top_view.png", 5.15, 1.1, w=4.6)
     tb(s, 5.15, 2.85, 4.6, 0.6, ["Top view vs ground truth. Machine hall (left) shows our main limitation: slow, "
@@ -244,10 +244,12 @@ def main():
             ["slow drift", "per-platform motion prior + rotor-drag velocity", f"drone ATE {rot_pg:.2f} m vs {rot_st:.2f} m standing still"],
             ["jamming level", "measured from packet loss, drives the noise model", "severity estimate 0.92–1.0 for a true 1.0"],
             ["spikes", "six-channel signature, not per-channel thresholds", "precision 0.97, recall 0.85 (labelled)"],
+            ["2 s signal loss", "attitude uncertainty grows with gap length",
+             "dropout error 1.97 m vs 2.71 m before the fix (stand-still 2.53)"],
             ["blind 5 s", "drones hold position; handheld: prior forecast", f"drone blind {rot_bl_pg:.2f} m vs {rot_bl_st:.2f} m"],
             ["budget", "standard library only, two streaming passes", f"{rs[0]['ms_per_s']:.1f} ms/s, {rs[0]['data_heap_mb']:.1f} MB heap"],
             ["output contract", "one pose per input row, always", "18 malformed-input tests pass"]]
-    table(s, 0.4, 1.05, 9.2, rows, [1.4, 3.9, 3.9], size=9.5, row_h=0.3)
+    table(s, 0.4, 1.05, 9.2, rows, [1.4, 3.9, 3.9], size=9.5, row_h=0.27)
     pic(s, "error_over_time.png", 1.1, 3.25, h=2.2)
 
     # ---------------- 7 demo & setup

@@ -8,7 +8,7 @@ PathGuard turns a degraded IMU log (EuRoC `imu0/data.csv`) into a 6-DoF trajecto
 IMU row, including the 5 s after the IMU fails. The whole estimator is one **pure-Python, standard-library-only**
 file, [`src/main.py`](src/main.py): no numpy, no compiled code, nothing to install.
 
-On real EuRoC and TUM-VI IMU data degraded by the organizers' own script, on flights never used for tuning:
+On real EuRoC and TUM-VI IMU data degraded by the organizers' own script, on flights held out during design and tuning (one handheld parameter, sig_a, was refit on all six rooms at the end; the drone preset was not):
 
 | | PathGuard | standing still | naive double integration |
 |---|---|---|---|

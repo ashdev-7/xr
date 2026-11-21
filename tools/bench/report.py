@@ -1,6 +1,6 @@
 """Generate every number used in README / deck / video from the CURRENT code (no hand-typed results).
 
-Runs on the TEST flights (never used for tuning), both column scenarios, seeds 42, 1, 2:
+Runs on the TEST flights (held out during design and tuning; the final handheld refit of sig_a used all rooms), both column scenarios, seeds 42, 1, 2:
   * PathGuard (final), stand-still, naive double integration, legacy C++ v1
   * ablations (one component switched off at a time)
   * resources: serial runtime (ms per s of IMU) and traced heap, per platform class
