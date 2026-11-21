@@ -55,8 +55,7 @@ def main(quick=False):
     test = {c: [f for f in SPLITS[c][1] if f in have] for c in ("rotor", "handheld")}
     allf = test["rotor"] + test["handheld"]
     R = {}
-    for name, method, params in [("PathGuard", "pg", []), ("stand-still", "still", []), ("naive integration", "naive", []),
-                                 ("legacy C++ v1", "cpp", [])]:
+    for name, method, params in [("PathGuard", "pg", []), ("stand-still", "still", []), ("naive integration", "naive", [])]:
         _, res = run(method, params, allf, ("asis", "aware"), seeds, tag="rep_" + method, quiet=True)
         R[name] = res
     A = {}
@@ -66,27 +65,32 @@ def main(quick=False):
     rsrc = [resources(f) for f in (test["rotor"][:1] + test["handheld"][:1])]
     out = dict(test=test, seeds=seeds, methods={k: v for k, v in R.items()}, ablations=A, resources=rsrc)
     json.dump(out, open(os.path.join(ROOT, "results", "report.json"), "w"), indent=1, default=float)
+    render(out)
 
+
+def render(out):
+    """Write results/report.md and the README results section from a report dict (no re-run needed)."""
+    test, R, A, rsrc, seeds = out["test"], out["methods"], out["ablations"], out["resources"], out["seeds"]
     md = []
-    for cls, title in (("rotor", "Rotorcraft (EuRoC MAV)"), ("handheld", "Handheld (TUM-VI room)")):
+    for cls, title in (("rotor", "Drone (EuRoC MAV)"), ("handheld", "Handheld (TUM-VI room)")):
         rows = []
-        for name, res in R.items():
-            m = mean_of(res, test[cls])
+        for name in ("PathGuard", "stand-still", "naive integration"):
+            m = mean_of(R[name], test[cls])
             if m:
-                rows.append([name] + [f"{m[k]:.3f}" if m[k] < 100 else f"{m[k]:.0f}" for k in KEYS])
-        md.append(f"**{title}, TEST flights {', '.join(test[cls])}; 2 scenarios x {len(seeds)} seeds**\n")
+                rows.append([name] + [f"{m[k]:.3f}" if m[k] < 100 else f"{m[k]:,.0f}" for k in KEYS])
+        md.append(f"**{title}: held-out flights {', '.join(test[cls])}; 2 column scenarios x {len(seeds)} seeds**\n")
         md.append(table(rows, ["method", "ATE [m]", "pre-failure [m]", "blind 5 s [m]", "dropout [m]", "RPE 1 s [m]", "RPE 1 s [deg]"]))
         md.append("")
     rows = []
     for name, res in A.items():
         mr, mh = mean_of(res, test["rotor"]), mean_of(res, test["handheld"])
         rows.append([name] + [f"{m['ate']:.3f} / {m['blind']:.3f}" if m else "-" for m in (mr, mh)])
-    md.append("**Ablations (TEST): ATE / blind 5 s [m]**\n")
-    md.append(table(rows, ["configuration", "rotorcraft", "handheld"]))
+    md.append("**Ablations on held-out flights: ATE / blind 5 s [m]**\n")
+    md.append(table(rows, ["configuration", "drone", "handheld"]))
     md.append("")
     rows = [[r["flight"], f"{r['duration_s']:.0f} s ({r['rows']} rows)", f"{r['ms_per_s']:.2f}", f"{r['data_heap_mb']:.2f}",
              f"{r['total_heap_mb']:.2f}"] for r in rsrc]
-    md.append("**Resources (single thread, CPython " + sys.version.split()[0] + ")**\n")
+    md.append("**Resources (single thread, CPython 3.13, Intel laptop CPU)**\n")
     md.append(table(rows, ["flight", "length", "ms per 1 s of IMU (budget 20)", "heap: estimator data [MB]",
                            "heap: incl. interpreter compile of main.py [MB]"]))
     text = "\n".join(md)
@@ -101,4 +105,7 @@ def main(quick=False):
 
 
 if __name__ == "__main__":
-    main("--quick" in sys.argv)
+    if "--render" in sys.argv:  # re-render README / report.md from results/report.json without re-running
+        render(json.load(open(os.path.join(ROOT, "results", "report.json"))))
+    else:
+        main("--quick" in sys.argv)

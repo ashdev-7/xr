@@ -1,12 +1,11 @@
 """Run a method over benchmark variants in parallel and print a score table.
 
-usage: python tools/bench/run.py [--method pg|still|naive|cpp] [--flights A,B] [--scen asis,aware]
+usage: python tools/bench/run.py [--method pg|still|naive|oracle:<name>] [--flights A,B] [--scen asis,aware]
                                  [--seeds 42,1,2] [--tag name] [--param=value ...]
 Methods
   pg     src/main.py (the submission) with --param overrides
   still  stand-still baseline: every position 0, identity attitude
   naive  strapdown double integration from the first calm second (no bias/prior handling)
-  cpp    legacy C++ v1 (legacy/main.cpp, built to build/pathguard) with --append_blind=0
 """
 import json, os, subprocess, sys, time
 from concurrent.futures import ProcessPoolExecutor
@@ -94,11 +93,6 @@ def job(args):
     t0 = time.perf_counter()
     if method == "pg":
         r = subprocess.run([PY, "-I", main_py, d, out, *params], capture_output=True, text=True)
-        if r.returncode:
-            return dict(flight=fl, scen=sc, seed=sd, error=r.stderr[-2000:])
-    elif method == "cpp":
-        exe = os.path.join(ROOT, "build", "pathguard.exe" if os.name == "nt" else "pathguard")
-        r = subprocess.run([exe, os.path.join(d, "imu0", "data.csv"), out, "--append_blind=0", *params], capture_output=True, text=True)
         if r.returncode:
             return dict(flight=fl, scen=sc, seed=sd, error=r.stderr[-2000:])
     elif method.startswith("oracle:"):

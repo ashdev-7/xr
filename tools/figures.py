@@ -16,8 +16,17 @@ sys.path.insert(0, HERE)
 from score import read_est, read_tum, slerp_gt, umeyama, q2R  # noqa: E402
 
 OUT = os.path.join(ROOT, "figures")
+DARK = "--dark" in sys.argv  # deck version: colours of the organizers' dark template
 BENCH = os.path.join(ROOT, "data", "bench")
-C_GT, C_PG, C_ST, C_BAD = "#222222", "#1f6fd1", "#9aa0a6", "#d93025"
+if DARK:
+    C_GT, C_PG, C_ST, C_BAD = "#E6EDF3", "#29B6F6", "#8B95A3", "#FF6B6B"
+    BG, FG = "#0B0F1A", "#C9D1D9"
+    OUT = os.path.join(OUT, "dark")
+    plt.rcParams.update({"figure.facecolor": BG, "axes.facecolor": BG, "savefig.facecolor": BG, "text.color": FG,
+                         "axes.labelcolor": FG, "axes.edgecolor": "#5A6472", "xtick.color": FG, "ytick.color": FG,
+                         "legend.labelcolor": FG})
+else:
+    C_GT, C_PG, C_ST, C_BAD = "#222222", "#1f6fd1", "#9aa0a6", "#d93025"
 plt.rcParams.update({"font.size": 10, "axes.spines.top": False, "axes.spines.right": False, "figure.dpi": 150})
 
 

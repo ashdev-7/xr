@@ -22,9 +22,8 @@ def main(team, imu):
     out = os.path.join(ROOT, "dist", team)
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(os.path.join(out, "src"))
-    for f in ("main.py", "Dockerfile"):
+    for f in ("main.py", "Dockerfile", "README.md"):
         shutil.copy(os.path.join(ROOT, "src", f), os.path.join(out, "src", f))
-    shutil.copy(os.path.join(ROOT, "README.md"), os.path.join(out, "src", "README.md"))
     traj = os.path.join(out, "estimated_trajectory.txt")
     main_py = os.path.join(out, "src", "main.py")
     # run (timed, no profiler)

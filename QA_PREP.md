@@ -14,8 +14,9 @@ per platform class.
 IMU-only navigation cannot see slow motion: a 0.01 m/s² bias becomes 0.5 m after 10 s and 50 m after
 100 s. The reference points are "stand still" (output a constant position) and naive double
 integration (thousands of metres on the same data). On the machine hall flights, 86 % of the true motion
-is in periods longer than 60 s. We beat standing still there because the rotor-drag model turns the
-accelerometer into a velocity sensor.
+is in periods longer than 60 s. On six held-out drone flights we reach 2.37 m ATE vs 3.20 m standing still
+(naive integration: 18,645 m), mainly because the rotor-drag model turns the accelerometer into a velocity sensor.
+On handheld data: 0.53 m vs 1.10 m.
 
 **3. What is the rotor-drag model and why is it allowed?**
 A multirotor's thrust acts along one body axis, so the specific force perpendicular to it is mostly rotor
@@ -58,8 +59,8 @@ it. We consider that cheating and did neither. Our parameters are a dozen global
 **10. How did you use AI?**
 Claude was the coding and research assistant. Decisions were made by measurement: every change has a
 hypothesis, a metric and a before/after in EXPERIMENTS.md, and several ideas were rejected because they did
-not help (a body-frame accelerometer-bias model, a Gauss–Markov drag-error state, scenario-specific bias
-models).
+not help (a body-frame accelerometer-bias model, a Gauss–Markov drag-error state, decimated drag updates,
+scenario-specific bias models, a return-to-launch prior).
 
 **11. What fails first under worse jamming?**
 The slow error components: accelerometer bias and scale drift late in the flight make the end of the
@@ -68,7 +69,7 @@ short dropouts are handled; very long dropouts would rely entirely on the motion
 
 **12. Why pure Python without numpy?**
 The FAQ requires Python, and peak memory is 20 % of the score. Importing numpy alone costs ~7.4 MB of
-traced heap. Our estimator's data structures peak at about 2 MB, and runtime is about 5–6 ms per second of IMU
+traced heap. Our estimator's data structures peak at 1.7–1.9 MB, and runtime is 6.2–6.9 ms per second of IMU
 against a 20 ms budget.
 
 **13. Why do you report ~2 MB and not the process memory?**
@@ -77,9 +78,10 @@ interpreter's RSS. We report the estimator's traced heap and, separately, the he
 compilation of `main.py`, which is a fixed cost of any Python script.
 
 **14. What are the limits of your approach?**
-(a) Slow motion on handheld data is unobservable; we fall back to a learned motion prior. (b) The drag
-coefficient is learned for the EuRoC hexacopter; another airframe would need re-fitting. (c) Heading is
-only weakly observable without rest periods. (d) The blind 5 s inherits all the error at the moment of
+(a) Trajectory size is not identifiable from the IMU alone: big halls are under-estimated ~2x, small rooms
+slightly over-estimated. (b) Slow motion on handheld data is unobservable; we fall back to a learned motion prior. (c) The drag
+coefficient is learned for the EuRoC hexacopter; another airframe would need re-fitting. (d) Heading is
+only weakly observable without rest periods. (e) The blind 5 s inherits all the error at the moment of
 failure.
 
 **15. Exactly one pose per IMU frame: how do you guarantee it?**

@@ -68,7 +68,6 @@ P = dict(
     drag=1,             # use the rotor-drag velocity measurement when the platform is a rotorcraft
     drag_mu=0.18,       # linear drag coefficient [1/s] (fitted on TRAIN flights: 0.18-0.20)
     drag_sig=1.2,       # velocity noise of one 10 Hz drag measurement [m/s]
-    drag_thrust=0.0,    # exponent of the thrust scaling mu * (f_thrust / mean)^e (0 = constant mu)
     drag_vib=0.4,       # rotors spinning and airborne when accel vibration exceeds this [m/s^2]
     # platform: -1 auto (rotor vibration signature), 0 handheld/ground, 1 rotorcraft
     platform=-1,
@@ -963,22 +962,18 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
             u = (su[0] / nu, su[1] / nu, su[2] / nu)
             dvel = array("d", bytes(8 * 2 * K))
             mu = P["drag_mu"]
-            gm = sum(kfb[3 * j] * u[0] + kfb[3 * j + 1] * u[1] + kfb[3 * j + 2] * u[2] for j in range(K) if air[j]) / max(1, sum(air))
             for j in range(K):
                 if not air[j]:
                     continue
                 f0, f1, f2 = kfb[3 * j], kfb[3 * j + 1], kfb[3 * j + 2]
                 fu = f0 * u[0] + f1 * u[1] + f2 * u[2]
-                mj = mu * (fu / gm) ** P["drag_thrust"] if fu > 0.5 * gm else mu  # drag grows with rotor thrust
-                vb = (-(f0 - fu * u[0]) / mj, -(f1 - fu * u[1]) / mj, -(f2 - fu * u[2]) / mj)
+                vb = (-(f0 - fu * u[0]) / mu, -(f1 - fu * u[1]) / mu, -(f2 - fu * u[2]) / mu)
                 bm = min(nb, j * per + per // 2)
                 vw = qrot((qs[4 * bm], qs[4 * bm + 1], qs[4 * bm + 2], qs[4 * bm + 3]), vb)
                 dvel[2 * j] = vw[0]; dvel[2 * j + 1] = vw[1]
             DIAG["drag_knots"] = sum(air); DIAG["thrust_axis"] = u
-            DIAG.update(roam_stats(dvel, air, K, kdt))
     rd = P["drag_sig"] ** 2 * (0.1 / kdt)
     store = array("d", bytes(8 * 14 * K))  # filtered mean (4) + covariance upper triangle (10)
-    loglik = 0.0  # log-likelihood of the drag measurements (diagnostic for empirical Bayes)
     for ax in range(3):
         horiz = ax < 2
         sv_ = P["sig_v_h"] if horiz else P["sig_v_z"]
@@ -1027,7 +1022,6 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
                 S = c11 + rd
                 k0, k1, k2, k3 = c01 / S, c11 / S, c12 / S, c13 / S
                 inn = dvel[2 * j + ax] - x1
-                loglik -= 0.5 * (inn * inn / S + math.log(S))
                 x0 += k0 * inn; x1 += k1 * inn; x2 += k2 * inn; x3 += k3 * inn
                 p0, p1, p2, p3 = c01, c11, c12, c13
                 c00 -= k0 * p0; c01 -= k0 * p1; c02 -= k0 * p2; c03 -= k0 * p3
@@ -1100,31 +1094,7 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
                             s2 = f2 + c02 * u0 + c12 * u1 + c22 * u2 + c23 * u3
                             s3 = f3 + c03 * u0 + c13 * u1 + c23 * u2 + c33 * u3
             pos[3 * j + ax] = s0; vel[3 * j + ax] = s1
-    if dvel is not None:
-        DIAG["drag_loglik"] = round(loglik, 2)
     return pos, vel, K, kdt, gz
-
-
-def roam_stats(dvel, air, K, kdt):
-    """How far the vehicle roams, from the drag velocity alone (no ground truth): horizontal speed std and the
-    RMS spread of the once-integrated, mean-removed drag velocity over airborne knots."""
-    js = [j for j in range(K) if air[j]]
-    if len(js) < 20:
-        return {}
-    out = {}
-    spread2 = 0.0
-    for ax in (0, 1):
-        v = [dvel[2 * j + ax] for j in js]
-        m = sum(v) / len(v)
-        pth, x = [], 0.0
-        for vi in v:
-            x += (vi - m) * kdt
-            pth.append(x)
-        pm = sum(pth) / len(pth)
-        spread2 += sum((q - pm) ** 2 for q in pth) / len(pth)
-        out["v_std_%d" % ax] = (sum((vi - m) ** 2 for vi in v) / len(v)) ** 0.5
-    out["roam"] = spread2 ** 0.5
-    return out
 
 
 # ----------------------------------------------------------------------------- pass E: output
@@ -1233,10 +1203,17 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL=(0.0,
                 buf.append("%s %.6f %.6f %.6f %.9f %.9f %.9f %.9f\n" % (ts_s, px, py, pz, qx, qy, qz, qw))
                 n_out += 1
                 if len(buf) >= 2048:
-                    fo.write("".join(buf)); buf = []
+                    fo.write(_no_negative_zero("".join(buf))); buf = []
         if buf:
-            fo.write("".join(buf))
+            fo.write(_no_negative_zero("".join(buf)))
     return n_out
+
+
+def _no_negative_zero(text):
+    """Print tiny negative values as 0.000000 rather than -0.000000 (fixed-width tokens, so exact)."""
+    for _ in range(2):  # twice: adjacent tokens share a space, and str.replace does not overlap matches
+        text = text.replace(" -0.000000000", " 0.000000000").replace(" -0.000000 ", " 0.000000 ")
+    return text
 
 
 # ----------------------------------------------------------------------------- main
