@@ -252,3 +252,12 @@ trajectory amplitude (oracle -18 %), which no IMU-only statistic tried so far id
 Final report with handheld blind_tau 0.3 (adopted from TRAIN backtests, +0.7 %): held-out handheld BLIND
 0.611 -> 0.652 (ATE 0.532 -> 0.535). A small TRAIN gain reversing on held-out flights is noise; reverted to the
 smoother forecast. README/deck keep the previous final report (unchanged code path).
+
+## 2026-11-22 — frequency-resolved amplitude diagnostic (VIO / GP review tracks)
+Transfer gain (cross-spectrum est.gt / gt power) on held-out flights, aware seed 42, by period band:
+2-20 s 0.8-1.0; 20-60 s 0.5-0.8; > 60 s 0.1-0.4 (MH_02: 0.12 on the band holding 79 % of its motion).
+Confirms the high-pass hypothesis: fast motion is reproduced at full size, slow excursions are filtered out.
+
+## 2026-11-22 — Student-t (scale-mixture) workspace prior (rejected; code not kept)
+IRLS on the horizontal p - c residual, w = (nu+2)/(nu+d^2), 3 passes. Drone TRAIN 2 scen x 2 seeds ATE:
+Gaussian 2.488; nu 10: 2.540; nu 3: 2.641; nu 1: 2.827. Releasing large excursions also releases slow drift.
