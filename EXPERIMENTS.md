@@ -168,3 +168,28 @@ TRAIN MH_01/03/05 (2 scen x seeds 42, 1), start sig_p_h 10: J_train 0.7590 -> 0.
 Held-out MH_02, MH_04, V1_02, V1_01 (2 scen x 3 seeds): J 0.8647 -> 0.7617, ATE 2.887 -> 2.651,
 BLIND 2.265 -> 1.867. Per flight ATE: MH_02 3.878 -> 3.937, MH_04 4.310 -> 3.729, V1_02 1.199 -> 1.341,
 V1_01 2.162 -> 1.598.
+
+## 2026-11-21 — "scale": three meanings, measured
+1. Sensor scale-factor drift (official script, 0.0015 s per sqrt(s) on both sensors). Oracle with
+   scale_rw_max = 0 (same seed/noise otherwise), 9 flights seed 42: aware ATE 1.780 (with) vs 1.786 (without);
+   asis 1.880 vs 1.895. No measurable cost: the accel effect is mostly along gravity and is absorbed by the
+   vertical bias random walk; the gyro effect is ~1 % of net rotation, bounded by tilt/rest updates.
+2. Trajectory amplitude (SE(3) evaluation cannot undo a wrong size). Sim(3) scale of GT vs estimate (aware):
+   MH_01 1.81, MH_02 2.13, MH_04 1.64 (machine hall: we shrink ~2x); V1_01 0.75, V1_02 0.73, V1_03 0.92
+   (Vicon room: slight overshoot); TUM room1/2/4 1.05/1.11/1.44. Oracle amplitude correction: MH ATE -10..-25 %.
+   Prior-size grid (aware, seed 42), ATE:
+   | flight | p3/v1 | p3/v2 | p3/v4 | p10/v1 | p10/v2 | p10/v4 | p30/v1 | p30/v2 | p30/v4 | p100/v1 | p100/v2 | p100/v4 |
+   |---|---|---|---|---|---|---|---|---|---|---|---|---|
+   | MH_01 | 3.78 | 3.72 | 3.70 | 3.39 | 3.23 | 3.18 | 2.76 | 2.54 | 2.65 | 3.23 | 4.64 | 5.70 |
+   | MH_02 | 4.26 | 4.20 | 4.18 | 3.93 | 3.73 | 3.66 | 3.50 | 3.01 | 2.86 | 3.35 | 2.85 | 2.87 |
+   | MH_04 | 5.73 | 5.56 | 5.51 | 4.53 | 3.65 | 3.36 | 3.97 | 2.81 | 2.78 | 4.00 | 3.52 | 4.11 |
+   | V1_01 | 1.55 | 1.52 | 1.51 | 1.48 | 1.48 | 1.51 | 2.09 | 2.58 | 2.84 | 3.55 | 5.85 | 7.04 |
+   | V1_02 | 1.21 | 1.13 | 1.11 | 1.25 | 1.34 | 1.43 | 1.50 | 2.10 | 2.48 | 1.60 | 2.43 | 2.97 |
+   | V1_03 | 1.29 | 1.26 | 1.25 | 1.19 | 1.16 | 1.17 | 1.41 | 1.73 | 1.94 | 1.72 | 2.61 | 3.15 |
+   Per-flight oracle mean 1.99 vs tuned p10/v2 2.43 (best single setting p10/v4 2.385).
+   Per-flight selection from data FAILED: drag-velocity roam spread, speed std and persistence overlap
+   (V1_02 vs MH_02/MH_03); the marginal likelihood of the drag measurements increases monotonically with the
+   prior size on every flight (plateau from p30), i.e. it would pick the hall setting everywhere.
+   Conclusion: amplitude is not identifiable from the IMU alone; keep the tuned compromise. drag_loglik and
+   roam statistics are kept as verbose diagnostics only.
+3. Unit scale (g vs m/s^2, s/ms/us/ns): auto-detected, covered by tests/test_contract.py.

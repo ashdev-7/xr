@@ -972,8 +972,10 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
                 vw = qrot((qs[4 * bm], qs[4 * bm + 1], qs[4 * bm + 2], qs[4 * bm + 3]), vb)
                 dvel[2 * j] = vw[0]; dvel[2 * j + 1] = vw[1]
             DIAG["drag_knots"] = sum(air); DIAG["thrust_axis"] = u
+            DIAG.update(roam_stats(dvel, air, K, kdt))
     rd = P["drag_sig"] ** 2 * (0.1 / kdt)
     store = array("d", bytes(8 * 14 * K))  # filtered mean (4) + covariance upper triangle (10)
+    loglik = 0.0  # log-likelihood of the drag measurements (diagnostic for empirical Bayes)
     for ax in range(3):
         horiz = ax < 2
         sv_ = P["sig_v_h"] if horiz else P["sig_v_z"]
@@ -1022,6 +1024,7 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
                 S = c11 + rd
                 k0, k1, k2, k3 = c01 / S, c11 / S, c12 / S, c13 / S
                 inn = dvel[2 * j + ax] - x1
+                loglik -= 0.5 * (inn * inn / S + math.log(S))
                 x0 += k0 * inn; x1 += k1 * inn; x2 += k2 * inn; x3 += k3 * inn
                 p0, p1, p2, p3 = c01, c11, c12, c13
                 c00 -= k0 * p0; c01 -= k0 * p1; c02 -= k0 * p2; c03 -= k0 * p3
@@ -1094,7 +1097,31 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
                             s2 = f2 + c02 * u0 + c12 * u1 + c22 * u2 + c23 * u3
                             s3 = f3 + c03 * u0 + c13 * u1 + c23 * u2 + c33 * u3
             pos[3 * j + ax] = s0; vel[3 * j + ax] = s1
+    if dvel is not None:
+        DIAG["drag_loglik"] = round(loglik, 2)
     return pos, vel, K, kdt, gz
+
+
+def roam_stats(dvel, air, K, kdt):
+    """How far the vehicle roams, from the drag velocity alone (no ground truth): horizontal speed std and the
+    RMS spread of the once-integrated, mean-removed drag velocity over airborne knots."""
+    js = [j for j in range(K) if air[j]]
+    if len(js) < 20:
+        return {}
+    out = {}
+    spread2 = 0.0
+    for ax in (0, 1):
+        v = [dvel[2 * j + ax] for j in js]
+        m = sum(v) / len(v)
+        pth, x = [], 0.0
+        for vi in v:
+            x += (vi - m) * kdt
+            pth.append(x)
+        pm = sum(pth) / len(pth)
+        spread2 += sum((q - pm) ** 2 for q in pth) / len(pth)
+        out["v_std_%d" % ax] = (sum((vi - m) ** 2 for vi in v) / len(v)) ** 0.5
+    out["roam"] = spread2 ** 0.5
+    return out
 
 
 # ----------------------------------------------------------------------------- pass E: output
