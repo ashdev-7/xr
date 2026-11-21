@@ -49,6 +49,7 @@ P = dict(
     sig_v_z=0.1,        # speed prior, vertical [m/s]
     sig_p_h=1.0,        # workspace prior, horizontal [m]
     sig_p_z=0.5,        # workspace prior, vertical [m]
+    blind_tau=-1.0,     # blind forecast: <0 smoother prior, 0 hold, >0 decaying velocity time constant [s]
     # integrity
     spike_k=8.0,        # spike threshold in robust sigmas (must hold on all 6 channels)
     # still detection (zero-velocity / zero-angular-rate updates), 0.5 s windows
@@ -1108,6 +1109,24 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L):
     # attitude after failure: hold the last smoothed attitude
     nbo = nb  # boundary index of the last bin
     n_out = 0
+
+    def hermite(t):
+        uk = t / kdt
+        j = int(uk) if uk > 0 else 0
+        if j >= K - 1:
+            j = K - 2
+        sk = min(1.0, max(0.0, uk - j))
+        s2, s3 = sk * sk, sk * sk * sk
+        h00, h10, h01, h11 = 2 * s3 - 3 * s2 + 1, (s3 - 2 * s2 + sk) * kdt, -2 * s3 + 3 * s2, (s3 - s2) * kdt
+        d00, d10, d01, d11 = (6 * s2 - 6 * sk) / kdt, 3 * s2 - 4 * sk + 1, (-6 * s2 + 6 * sk) / kdt, 3 * s2 - 2 * sk
+        j3, j4 = 3 * j, 3 * j + 3
+        p_ = [h00 * pos[j3 + c] + h10 * vel[j3 + c] + h01 * pos[j4 + c] + h11 * vel[j4 + c] for c in range(3)]
+        v_ = [d00 * pos[j3 + c] + d10 * vel[j3 + c] + d01 * pos[j4 + c] + d11 * vel[j4 + c] for c in range(3)]
+        return p_, v_
+    # blind window (after the last valid sample): blind_tau < 0 -> the smoother's own prior-conditional
+    # forecast; 0 -> hold the position at failure; > 0 -> velocity at failure decaying with time constant tau
+    tau = P["blind_tau"]
+    pL, vL = hermite(T_L)
     buf = []
     with open(out_path, "w", newline="\n") as fo:
         fo.write("# timestamp tx ty tz qx qy qz qw\n")
@@ -1158,6 +1177,12 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L):
                 qw *= n; qx *= n; qy *= n; qz *= n
                 if qw < 0:
                     qw, qx, qy, qz = -qw, -qx, -qy, -qz
+                if tau >= 0 and t > T_L:
+                    f_ = tau * (1.0 - math.exp(-(t - T_L) / tau)) if tau > 0 else 0.0
+                    buf.append("%s %.6f %.6f %.6f %.9f %.9f %.9f %.9f\n" % (ts_s, pL[0] + f_ * vL[0], pL[1] + f_ * vL[1],
+                                                                          pL[2] + f_ * vL[2], qx, qy, qz, qw))
+                    n_out += 1
+                    continue
                 # position: cubic Hermite between knots
                 uk = t / kdt
                 j = int(uk) if uk > 0 else 0
