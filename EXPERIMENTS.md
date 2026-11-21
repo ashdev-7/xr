@@ -222,3 +222,28 @@ forecast 2.371 (BLIND 2.415). Resources: 6.86 / 6.19 ms per s; estimator heap 1.
 Follow-up on TRAIN handheld (room1/3/5, 2 scen x 3 seeds): repair=0 J 0.5523 -> 0.5495 (-0.5 %), adapt=0 0.6161.
 Decision: keep spike repair (tiny cost on this script's handheld spikes, protection against stronger jamming);
 keep adaptation (clearly better on TRAIN; the TEST ATE dip is within noise and its BLIND is worse).
+
+## 2026-11-21 — systematic pass over the literature's ranked gaps (docs/literature_review.md)
+Per-flight drag fit vs GT (1 s averaging, vibration-gated airborne): mu axis1/axis2 MH 0.16-0.20/0.20-0.22,
+V-room 0.09-0.20/0.17-0.22; quadratic term changes sign between flights and adds <= 0.01 R^2.
+-> The review's hypothesis "mu differs by environment and explains the hall/room amplitude error" is refuted.
+Anisotropic drag (mu 0.17 / 0.21, fitted on TRAIN): TRAIN 2 scen x 2 seeds ATE 2.488 -> 2.548 (rejected; mu acts
+as an amplitude knob already balanced by tuning).
+Blind window, masked backtests: each TRAIN flight cut at 45/60/75/90 % and re-degraded with the official script
+(failure at maximum jamming at every cut), 8 windows per flight. BLIND [m]:
+| blind_tau | drone (40 windows) | handheld (24 windows) |
+|---|---|---|
+| 0 (hold) | 3.195 | 1.158 |
+| 0.3 | 3.196 | 1.102 |
+| 0.7 | 3.197 | 1.134 |
+| smoother forecast | 3.203 | 1.110 |
+The forecast rule barely matters; the blind error is the position error at the moment of failure.
+Kept: handheld blind_tau 0.3 (OU-optimal decay); drones keep hold.
+Accel bias coupled into the drag measurement (z = v - b/mu, Abeywardena 2016 / HDVIO): TRAIN ATE 2.488 -> 3.534
+(weight 1) / 3.253 (0.5); backtests 2.896 -> 3.472. Rejected: in the decoupled design the world-frame bias state
+also absorbs tilt-induced gravity leakage, which the drag measurement does not contain.
+Ceiling of any attitude improvement (tight coupling, gyro calibration, InEKF refinements): drone TRAIN 2 scen,
+GT attitude oracle 2.464 -> 2.445 (-0.8 %); handheld earlier -5 %. Not worth a full-state rebuild.
+Other ceilings from ablations (held-out): spike handling 0 % (no repair: same ATE), rest detection 1.6 %,
+blind forecast <= 1 %, jamming adaptation 0.6 % ATE / 11 % BLIND (kept). The only large remaining prize is
+trajectory amplitude (oracle -18 %), which no IMU-only statistic tried so far identifies.

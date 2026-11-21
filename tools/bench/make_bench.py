@@ -57,7 +57,8 @@ def write_gt(kind, gt_path, out_path):
 
 LEVEL = None  # None = official default max_level
 DEBIAS = False
-NOSCALE = False  # oracle: degradation without scale-factor random walk  # oracle: remove the ground-truth sensor biases (EuRoC) before degradation
+NOSCALE = False  # oracle: degradation without scale-factor random walk
+TRUNC = None     # backtest: keep only this fraction of the raw flight, then degrade (failure moves with it)  # oracle: remove the ground-truth sensor biases (EuRoC) before degradation
 
 
 def run_official(df, seed):
@@ -85,6 +86,10 @@ def build(flight, kind, imu_path, gt_path, seeds, scenarios):
     header = official.detect_header(imu_path)
     raw = pd.read_csv(imu_path, header=header)
     assert raw.shape[1] == 7, raw.shape
+    if TRUNC is not None:
+        tcol = raw.columns[0]
+        t_rel = (raw[tcol] - raw[tcol].iloc[0]) * 1e-9
+        raw = raw[t_rel <= TRUNC * t_rel.iloc[-1]].reset_index(drop=True)
     cols = list(raw.columns)  # t, w xyz, a xyz (EuRoC order)
     if DEBIAS:
         g = np.loadtxt(gt_path, delimiter=",", comments="#")
@@ -99,7 +104,7 @@ def build(flight, kind, imu_path, gt_path, seeds, scenarios):
                 re = raw[[cols[0]] + cols[4:7] + cols[1:4]]
                 out, stats = run_official(re, seed)
                 out = out[cols]
-            vd = os.path.join(od, f"{sc}{'' if LEVEL is None else '_L%g' % LEVEL}{'_nob' if DEBIAS else ''}{'_nosf' if NOSCALE else ''}_s{seed}")
+            vd = os.path.join(od, f"{sc}{'' if LEVEL is None else '_L%g' % LEVEL}{'_nob' if DEBIAS else ''}{'_nosf' if NOSCALE else ''}{'_T%02d' % round(100 * TRUNC) if TRUNC is not None else ''}_s{seed}")
             os.makedirs(os.path.join(vd, "imu0"), exist_ok=True)
             out.to_csv(os.path.join(vd, "imu0", "data.csv"), index=False, header=True)
             ts = out[cols[0]].to_numpy(np.int64)
@@ -122,11 +127,13 @@ if __name__ == "__main__":
     ap.add_argument("--level", type=float, default=None, help="override max_level (oracle/stress variants)")
     ap.add_argument("--debias", action="store_true", help="oracle: subtract GT sensor biases first (EuRoC)")
     ap.add_argument("--noscale", action="store_true", help="oracle: no scale-factor random walk")
+    ap.add_argument("--trunc", type=float, default=None, help="backtest: fraction of the raw flight to keep")
     ap.add_argument("flights", nargs="*")
     a = ap.parse_args()
     LEVEL = a.level
     DEBIAS = a.debias
     NOSCALE = a.noscale
+    TRUNC = a.trunc
     fl = load_flights()
     for name, (kind, imu, gt) in fl.items():
         if a.flights and name not in a.flights:
