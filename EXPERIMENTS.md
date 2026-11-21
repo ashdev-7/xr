@@ -247,3 +247,8 @@ GT attitude oracle 2.464 -> 2.445 (-0.8 %); handheld earlier -5 %. Not worth a f
 Other ceilings from ablations (held-out): spike handling 0 % (no repair: same ATE), rest detection 1.6 %,
 blind forecast <= 1 %, jamming adaptation 0.6 % ATE / 11 % BLIND (kept). The only large remaining prize is
 trajectory amplitude (oracle -18 %), which no IMU-only statistic tried so far identifies.
+
+## 2026-11-22 — handheld blind decay reverted
+Final report with handheld blind_tau 0.3 (adopted from TRAIN backtests, +0.7 %): held-out handheld BLIND
+0.611 -> 0.652 (ATE 0.532 -> 0.535). A small TRAIN gain reversing on held-out flights is noise; reverted to the
+smoother forecast. README/deck keep the previous final report (unchanged code path).
