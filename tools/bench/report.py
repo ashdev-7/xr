@@ -92,7 +92,7 @@ def render(out):
              f"{r['total_heap_mb']:.2f}"] for r in rsrc]
     md.append("**Resources (single thread, CPython 3.13, Intel laptop CPU)**\n")
     md.append(table(rows, ["flight", "length", "ms per 1 s of IMU (budget 20)", "heap: estimator data [MB]",
-                           "heap: incl. interpreter compile of main.py [MB]"]))
+                           "heap: worst case, traced from interpreter start incl. parsing the code [MB]"]))
     text = "\n".join(md)
     open(os.path.join(ROOT, "results", "report.md"), "w").write(text + "\n")
     readme = os.path.join(ROOT, "README.md")

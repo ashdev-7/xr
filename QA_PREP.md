@@ -76,8 +76,11 @@ against a 20 ms budget (cold process, measured by tools/bench/report.py).
 
 **13. Why do you report ~2 MB and not the process memory?**
 The FAQ says memory is measured at the heap level (data structures, buffers, estimation logic), not the
-interpreter's RSS. We report the estimator's traced heap and, separately, the heap including Python's own
-compilation of `main.py`, which is a fixed cost of any Python script.
+interpreter's RSS. We report the estimator's traced heap (~1.6 MB) and, separately, the worst case traced from
+interpreter start including parsing our code (~3 MB). Parsing all the code as one 1,350-line file cost ~7 MB
+(7.9 MB on Python 3.13, too close to 8), so `main.py` compiles five stage files one at a time into its own
+namespace. Output is bit-identical to the single file; if the stage files were missing, `main.py` still writes a
+valid stand-still trajectory.
 
 **14. What are the limits of your approach?**
 (a) Trajectory size is not identifiable from the IMU alone: big halls are under-estimated ~2x, small rooms

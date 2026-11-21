@@ -50,7 +50,7 @@ Python ≥ 3.8 (CI runs 3.8–3.13 and the Docker build on every push). Single t
 imu0/data.csv
  │  pass 1 (stream)  format survey; integrity: NaN, dead (all-zero), frozen and duplicated rows, six-channel spikes;
  │                   jamming meter: packet loss → severity s(t), per-second noise levels;
- │                   preintegration into 20 ms bins; 0.5 s rest statistics
+ │                   preintegration into 40 ms bins; 0.5 s rest statistics
  ├─ platform         rotor-vibration signature → drone or handheld motion prior
  ├─ attitude         error-state Kalman filter [δθ (world frame), gyro bias] + error-state RTS smoother;
  │                   gravity-direction updates (roll/pitch), zero-angular-rate updates at rest
@@ -81,7 +81,7 @@ imu0/data.csv
    and zero-angular-rate updates; the latter observes the gyro bias about gravity, i.e. heading drift.
 5. **Smoothing, not filtering.** The whole log is available offline; RTS smoothers carry information (for
    example a gyro bias learned late in the flight) back to the start and bridge dropouts from both sides.
-6. **Lean by construction.** Two streaming passes; memory grows with 20 ms bins and 10 Hz knots, not with rows.
+6. **Lean by construction.** Two streaming passes; memory grows with 40 ms bins and 10 Hz knots, not with rows. The code is compiled one stage file at a time, so even memory traced from interpreter start peaks at ~3 MB.
 
 ## Evaluation protocol
 

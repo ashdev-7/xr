@@ -113,10 +113,15 @@ def job(args):
 def run(method="pg", params=(), flights=None, scen=("asis", "aware"), seeds=(42,), tag=None, quiet=False, workers=10):
     outdir = os.path.join(ROOT, "results", tag or method)
     os.makedirs(outdir, exist_ok=True)
-    # snapshot the estimator so that editing src/main.py during a long run cannot mix versions
-    import shutil
-    main_py = os.path.join(outdir, "_main_snapshot.py")
-    shutil.copy(os.environ.get("PATHGUARD_MAIN") or os.path.join(ROOT, "src", "main.py"), main_py)
+    # snapshot the estimator (main.py + stage files) so that editing src/ during a long run cannot mix versions
+    import shutil, glob
+    snap = os.path.join(outdir, "_snapshot")
+    shutil.rmtree(snap, ignore_errors=True); os.makedirs(snap)
+    for f in glob.glob(os.path.join(ROOT, "src", "*.py")):
+        shutil.copy(f, snap)
+    main_py = os.path.join(snap, "main.py")
+    if os.environ.get("PATHGUARD_MAIN"):  # development override: a complete single-file estimator
+        shutil.copy(os.environ["PATHGUARD_MAIN"], main_py)
     jobs = [(method, fl, sc, sd, d, list(params), outdir, main_py) for fl, sc, sd, d in variants(flights, scen, seeds)]
     with ProcessPoolExecutor(workers) as ex:
         res = list(ex.map(job, jobs))

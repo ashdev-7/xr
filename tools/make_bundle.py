@@ -5,7 +5,7 @@
         ├── estimated_trajectory.txt   generated here from the evaluation IMU file
         ├── metadata.json              measured runtime / memory / compute specs
         └── src/
-            ├── main.py                the estimator (standalone, stdlib only)
+            ├── main.py, pg_*.py      the estimator (entry point + stage files, stdlib only)
             ├── README.md              how to run
             └── Dockerfile
 
@@ -22,7 +22,8 @@ def main(team, imu):
     out = os.path.join(ROOT, "dist", team)
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(os.path.join(out, "src"))
-    for f in ("main.py", "Dockerfile", "README.md"):
+    import glob
+    for f in [os.path.basename(x) for x in glob.glob(os.path.join(ROOT, "src", "*.py"))] + ["Dockerfile", "README.md"]:
         shutil.copy(os.path.join(ROOT, "src", f), os.path.join(out, "src", f))
     traj = os.path.join(out, "estimated_trajectory.txt")
     main_py = os.path.join(out, "src", "main.py")

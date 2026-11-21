@@ -151,7 +151,7 @@ def main():
             set_runs(sh, [f"Members: {a.members}"], size=13)
             sh.left = Inches(0.55); sh.top = Inches(3.75); sh.width = Inches(6.0)
     tb(s, 0.55, 4.55, 8.5, 0.6, [[("Code: ", True, ACC), (a.repo, False, TXT)],
-                                 f"Pure Python, standard library only · one file · {max(r['ms_per_s'] for r in rs):.1f} ms per 1 s of IMU "
+                                 f"Pure Python, standard library only · {max(r['ms_per_s'] for r in rs):.1f} ms per 1 s of IMU "
                                  f"(budget 20) · {max(r['data_heap_mb'] for r in rs):.1f} MB heap (budget 8)"], size=11, color=MUTED)
 
     # ---------------- 2 problem
@@ -205,7 +205,7 @@ def main():
             arrow(s, x + 1.72, 2.1, x + 1.9, 2.1)
         x += 1.9
     tb(s, 0.4, 3.35, 9.2, 1.9, [
-        [("Engineering. ", True, ACC), ("One standard-library file; the log is streamed twice; memory grows with 40 ms bins and "
+        [("Engineering. ", True, ACC), ("Standard library only, compiled stage by stage; the log is streamed twice; memory grows with 40 ms bins and "
                                         "10 Hz knots, not with rows. Any input, however broken, yields one well-formed pose per row.", False, None)],
         [("Measured. ", True, ACC), (f"{rs[0]['ms_per_s']:.1f} ms per 1 s of IMU (budget 20) and {rs[0]['data_heap_mb']:.1f} MB of estimator "
                                      f"heap on a {rs[0]['duration_s']:.0f} s drone flight; {rs[1]['ms_per_s']:.1f} ms and "

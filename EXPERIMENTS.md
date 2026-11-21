@@ -330,3 +330,15 @@ Rejected 1: shrink the blind forecast toward the mean estimated position (TRAIN 
 windows): handheld best = no shrink (1.103); drone best 3.221 -> 3.127 (-3 %) only with a position jump at F.
 Rejected 2: zero-velocity prior on the blind knots (smoother sees "motion settles"), handheld TRAIN official:
 blind 0.611 -> 0.635 / 0.693 / 0.778 / 0.849 for sigma 0.5 / 0.2 / 0.1 / 0.05 m/s.
+
+## 2026-11-22 — worst-case memory: stage files compiled one at a time (kept)
+If memory is traced from interpreter start (strictest harness), the single 1,350-line main.py peaked at 7.86 MB
+on Python 3.13 (6.90 on 3.10): CPython parses a whole file at once (~7 MB transient), the data heap is 1.6 MB.
+Change (tools/split_main.py): main.py = entry point, parameters, input reader, stand-still fallback + loader that
+compiles pg_ingest / pg_math / pg_attitude / pg_translation / pg_output one at a time into main.py's namespace
+(by path, so "python -I" works; candidates: __file__ dir, cwd, cwd/src). Output bit-identical on 7 inputs (drone,
+handheld, 2 s gaps, backtest cut, sample) and on Python 3.10; identical under 6 launch modes (absolute path from
+another cwd with -I, cd src, runpy, exec without __file__ from repo or src, import). main.py alone: stand-still
+output with one pose per row (29480/29480) and a stderr message. Contract 18/18, ESKF test pass.
+Worst-case traced peak: 3.13: 7.86 -> 2.91 (MH_02) / 3.15 MB (room2); 3.10: 6.90 -> 2.25 / 2.18 MB.
+Largest single-stage parse 1.95 MB (3.13).
