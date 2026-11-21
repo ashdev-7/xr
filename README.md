@@ -104,7 +104,7 @@ imu0/data.csv
 
 | method | ATE [m] | pre-failure [m] | blind 5 s [m] | dropout [m] | RPE 1 s [m] | RPE 1 s [deg] |
 |---|---|---|---|---|---|---|
-| PathGuard | 2.374 | 2.363 | 2.209 | 2.335 | 0.354 | 0.884 |
+| PathGuard | 2.370 | 2.359 | 2.228 | 2.334 | 0.351 | 0.891 |
 | stand-still | 3.197 | 3.206 | 2.885 | 3.284 | 0.760 | 20.395 |
 | naive integration | 18,645 | 17,227 | 41,282 | 19,877 | 636 | 20.395 |
 
@@ -112,7 +112,7 @@ imu0/data.csv
 
 | method | ATE [m] | pre-failure [m] | blind 5 s [m] | dropout [m] | RPE 1 s [m] | RPE 1 s [deg] |
 |---|---|---|---|---|---|---|
-| PathGuard | 0.532 | 0.527 | 0.611 | 0.605 | 0.214 | 2.623 |
+| PathGuard | 0.516 | 0.511 | 0.596 | 0.556 | 0.189 | 2.392 |
 | stand-still | 1.096 | 1.112 | 0.621 | 1.034 | 0.729 | 44.998 |
 | naive integration | 644 | 595 | 1,343 | 734 | 19.543 | 44.998 |
 
@@ -120,20 +120,20 @@ imu0/data.csv
 
 | configuration | drone | handheld |
 |---|---|---|
-| full | 2.374 / 2.209 | 0.532 / 0.611 |
-| no rotor-drag velocity | 2.965 / 2.895 | 0.532 / 0.611 |
-| no rest detection (ZUPT/ZARU) | 2.413 / 2.257 | 0.532 / 0.611 |
-| no spike repair | 2.374 / 2.209 | 0.518 / 0.600 |
-| no jamming adaptation | 2.388 / 2.473 | 0.509 / 0.676 |
-| no attitude smoother (filter only) | 2.379 / 2.211 | 0.536 / 0.591 |
-| blind: smoother forecast (no hold) | 2.371 / 2.415 | 0.532 / 0.611 |
+| full | 2.370 / 2.228 | 0.516 / 0.596 |
+| no rotor-drag velocity | 2.959 / 2.921 | 0.516 / 0.596 |
+| no rest detection (ZUPT/ZARU) | 2.409 / 2.259 | 0.516 / 0.596 |
+| no spike repair | 2.370 / 2.228 | 0.511 / 0.594 |
+| no jamming adaptation | 2.392 / 2.387 | 0.497 / 0.664 |
+| no attitude smoother (filter only) | 2.377 / 2.237 | 0.528 / 0.580 |
+| blind: smoother forecast (no hold) | 2.368 / 2.413 | 0.516 / 0.596 |
 
 **Resources (single thread, CPython 3.13, Intel laptop CPU)**
 
 | flight | length | ms per 1 s of IMU (budget 20) | heap: estimator data [MB] | heap: incl. interpreter compile of main.py [MB] |
 |---|---|---|---|---|
-| MH_02_easy | 152 s (29480 rows) | 5.34 | 1.85 | 7.74 |
-| TUMVI_room2 | 144 s (27879 rows) | 7.70 | 1.73 | 7.74 |
+| MH_02_easy | 152 s (29480 rows) | 6.21 | 1.64 | 7.79 |
+| TUMVI_room2 | 144 s (27879 rows) | 5.84 | 1.35 | 7.79 |
 <!-- RESULTS:END -->
 
 ![Error over time](figures/error_over_time.png)

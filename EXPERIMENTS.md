@@ -313,3 +313,8 @@ rotor J 0.7710 -> 0.7681 (only sig_v_h 4 -> 2); handheld J 0.6103 -> 0.6076 (onl
 Checked on unseen seed 2 and on the 2 s-gap variants: rotor sig_v_h 2 worse (seed 2 ATE 2.472 -> 2.514, gaps
 2.611 -> 2.638) -> rejected (in-sample noise); handheld sig_a 0.05 better on seed 2 (0.461 -> 0.457), gaps
 neutral (0.802 -> 0.802) -> adopted.
+
+## 2026-11-22 — correction to the efficiency entry above
+The 1.83 -> 1.31 MB and 6.04 -> 4.59 ms/s figures came from a second run inside a warm process. Cold processes
+(how a grader runs us), MH_02 aware s42: estimator heap 1.86 -> 1.64 MB, CPU 7.7 -> 5.8-6.2 ms/s. The README's
+resource table (report.py) uses cold processes and is the number to quote.
