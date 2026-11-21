@@ -318,3 +318,15 @@ neutral (0.802 -> 0.802) -> adopted.
 The 1.83 -> 1.31 MB and 6.04 -> 4.59 ms/s figures came from a second run inside a warm process. Cold processes
 (how a grader runs us), MH_02 aware s42: estimator heap 1.86 -> 1.64 MB, CPU 7.7 -> 5.8-6.2 ms/s. The README's
 resource table (report.py) uses cold processes and is the number to quote.
+
+## 2026-11-22 — blind-window margin (20 pts). Handheld blind is only 3 % below stand-still (0.60 vs 0.62 held-out)
+Diagnosis (tools/bench/errwin.py, error after evo alignment by window relative to the failure F):
+official ends, 6 rooms x 4 variants: PG first half 0.42, F-15..F-5 0.56, F-5..F-1 0.72, F-1..F 0.68, blind 0.68/0.57;
+stand-still F-5..F-1 0.70, blind 0.77/0.60. The estimate degrades in the last seconds (one-sided smoother end
+effect at maximum jamming); at the failure PG is no better than the trajectory centre. Drones: no end effect
+(F-5..F-1 1.72 vs first half 2.50). Blind attitude error (23 deg tilt, 86 deg heading handheld) is the true
+rotation during 5 s without data; it does not enter the translation ATE.
+Rejected 1: shrink the blind forecast toward the mean estimated position (TRAIN backtests, 40 drone / 24 handheld
+windows): handheld best = no shrink (1.103); drone best 3.221 -> 3.127 (-3 %) only with a position jump at F.
+Rejected 2: zero-velocity prior on the blind knots (smoother sees "motion settles"), handheld TRAIN official:
+blind 0.611 -> 0.635 / 0.693 / 0.778 / 0.849 for sigma 0.5 / 0.2 / 0.1 / 0.05 m/s.
