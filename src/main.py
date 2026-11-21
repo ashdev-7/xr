@@ -50,6 +50,7 @@ P = dict(
     sig_p_h=1.0,        # workspace prior, horizontal [m]
     sig_p_z=0.5,        # workspace prior, vertical [m]
     blind_tau=-1.0,     # blind forecast: <0 smoother prior, 0 hold, >0 decaying velocity time constant [s]
+    att_tau=0.3,        # blind attitude: 0 hold, >0 last body rate decaying with this time constant [s]
     # integrity
     spike_k=8.0,        # spike threshold in robust sigmas (must hold on all 6 channels)
     # still detection (zero-velocity / zero-angular-rate updates), 0.5 s windows
@@ -1090,7 +1091,7 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
 
 
 # ----------------------------------------------------------------------------- pass E: output
-def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L):
+def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL=(0.0, 0.0, 0.0)):
     bdt = P["bin_dt"]
     isint = info["is_int"] and info["tscale"] == 1e-9
     t0i, t0f, tsc = info["first_ts"], info["first_tsf"], info["tscale"]
@@ -1115,6 +1116,7 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L):
     # forecast; 0 -> hold the position at failure; > 0 -> velocity at failure decaying with time constant tau
     tau = P["blind_tau"]
     pL, vL = hermite(T_L)
+    atau = P["att_tau"]
     buf = []
     with open(out_path, "w", newline="\n") as fo:
         fo.write("# timestamp tx ty tz qx qy qz qw\n")
@@ -1153,7 +1155,11 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L):
                     i = int(u) if u > 0 else 0
                     sfr = u - i if u > 0 else 0.0
                 if i >= nbo:
+                    # blind window: continue the last body rate, decaying with time constant att_tau
                     qw, qx, qy, qz = qs[4 * nbo], qs[4 * nbo + 1], qs[4 * nbo + 2], qs[4 * nbo + 3]
+                    if atau > 0 and t > T_L:
+                        fa = atau * (1.0 - math.exp(-(t - T_L) / atau))
+                        qw, qx, qy, qz = qmul((qw, qx, qy, qz), qexp(wL[0] * fa, wL[1] * fa, wL[2] * fa))
                 else:
                     a0, a1, a2, a3 = qs[4 * i], qs[4 * i + 1], qs[4 * i + 2], qs[4 * i + 3]
                     b0, b1, b2, b3 = qs[4 * i + 4], qs[4 * i + 5], qs[4 * i + 6], qs[4 * i + 7]
@@ -1254,7 +1260,16 @@ def run(inp, out_path, hook=None):
     if hook:
         qs = hook("attitude", dict(qs=qs, nb=nb, info=info))
     pos, vel, K, kdt, gz = translation(asum, cnt, nb, qs, T_L, T_end)
-    n_out = write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L)
+    # body rate at the failure: mean bias-corrected gyro over the last 0.5 s of data (for the blind attitude)
+    wL, nw_ = [0.0, 0.0, 0.0], 0
+    for b in range(nb - 1, max(-1, nb - 1 - int(0.5 / P["bin_dt"])), -1):
+        c = cnt[b]
+        if c:
+            for k in range(3):
+                wL[k] += gsum[3 * b + k] / c - bg_end[k]
+            nw_ += 1
+    wL = [x / nw_ for x in wL] if nw_ else wL
+    n_out = write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL)
     log(f"src={src} rows={st['rows']} out={n_out} dt={info['dt_nom']:.5f} gyro_first={info['gyro_first']} "
         f"ascale={info['ascale']:.3f} T_L={T_L:.2f}s bins={nb} knots={K}")
     log(f"platform {'rotorcraft' if plat else 'handheld'} (accel vibration {vib:.3f} m/s^2) {DIAG}")

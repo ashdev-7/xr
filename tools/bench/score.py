@@ -164,9 +164,17 @@ def score(est_path, run_dir, gt=None):
     # E = inv(dG) dE  -> translation part = dRg^T (dpe - dpg)
     et = np.einsum("nji,nj->ni", dRg, dpe - dpg)
     er = rot_angle(np.einsum("nji,njk->nik", dRg, dRe))
+    # evo-style RPE over ALL rows (incl. blind window), delta = 200 frames (1 s at 200 Hz)
+    i2 = np.arange(len(t) - 200); k2 = i2 + 200
+    dRe2 = np.einsum("nji,njk->nik", Rea[i2], Rea[k2]); dRg2 = np.einsum("nji,njk->nik", Rg[i2], Rg[k2])
+    dpe2 = np.einsum("nji,nj->ni", Rea[i2], pa[k2] - pa[i2]); dpg2 = np.einsum("nji,nj->ni", Rg[i2], pgi[k2] - pgi[i2])
+    et2 = np.einsum("nji,nj->ni", dRg2, dpe2 - dpg2)
+    er2 = rot_angle(np.einsum("nji,njk->nik", dRg2, dRe2))
     return dict(ate=rms(np.ones(len(t), bool)), wp=rms(pre), wp10=wp10, blind=rms(blind), drop=rms(dm),
                 rpe_t=float(np.sqrt(np.mean(np.sum(et ** 2, 1)))), rpe_r=float(np.sqrt(np.mean(er ** 2))),
-                are=float(np.sqrt(np.mean(are ** 2))), blind_end=float(err[blind][-1]) if blind.any() else float("nan"),
+                are=float(np.sqrt(np.mean(are ** 2))),
+                rpe_t_all=float(np.sqrt(np.mean(np.sum(et2 ** 2, 1)))), rpe_r_all=float(np.sqrt(np.mean(er2 ** 2))),
+                are_blind=float(np.sqrt(np.mean(are[blind] ** 2))) if blind.any() else float("nan"), blind_end=float(err[blind][-1]) if blind.any() else float("nan"),
                 n=int(ok.sum()), issues=issues)
 
 

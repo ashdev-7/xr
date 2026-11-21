@@ -19,7 +19,7 @@ from score import score, read_tum  # noqa: E402
 ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
 BENCH = os.path.join(ROOT, "data", "bench")
 PY = sys.executable if os.name != "nt" else "python"
-KEYS = ["ate", "wp", "wp10", "blind", "drop", "rpe_t", "rpe_r", "are"]
+KEYS = ["ate", "wp", "wp10", "blind", "drop", "rpe_t", "rpe_r", "are", "rpe_t_all", "rpe_r_all"]
 
 
 def variants(flights=None, scen=("asis", "aware"), seeds=(42,)):

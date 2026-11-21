@@ -130,3 +130,17 @@ Oracle with correct values, 5 EuRoC flights asis: 3.290 -> 3.239 with bg_k 0.01 
 Coordinate descent on TUM-VI room1/3/5 (2 scen x seeds 42, 1): J_train 0.5879 -> 0.5644
 (sig_v_h 0.7 -> 1.96, ba_k 0.01 -> 0.028, tilt_sig 0.5 -> 0.25). Held-out TUM room2/4/6 (2 scen x 3 seeds):
 J_test 0.6788 -> 0.6738, ATE 0.551 -> 0.532, BLIND 0.602 -> 0.611.
+
+## 2026-11-21 — scorer vs evo; blind-window attitude (kept, small)
+Cross-check: our ATE equals evo_ape -a to 4 decimals (room2 0.4747/0.474659, MH_01 4.0890/4.089175,
+V1_02 1.2830/1.282939). evo_rpe has no "seconds" unit (frames/deg/rad/m); default is 1 frame. Over all
+rows (incl. the blind window) RPE rotation is dominated by the blind window when the attitude is held
+(room2 blind-window absolute rotation error 45 deg). Scorer now also reports rpe_t_all / rpe_r_all
+(200 frames, all rows). Blind attitude = last body rate decaying with att_tau, TRAIN flights (5 x 2 scen):
+| att_tau | rpe_r (1 s, starts before failure) | rpe_r_all | ARE |
+|---|---|---|---|
+| 0 (hold) | 1.689 | 3.907 | 16.24 |
+| 0.3 | 1.445 | 3.886 | 16.62 |
+| 0.7 | 1.372 | 4.083 | 17.48 |
+| 1.5 | 1.392 | 4.441 | 19.09 |
+Kept 0.3 s.
