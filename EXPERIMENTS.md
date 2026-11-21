@@ -144,3 +144,13 @@ rows (incl. the blind window) RPE rotation is dominated by the blind window when
 | 0.7 | 1.372 | 4.083 | 17.48 |
 | 1.5 | 1.392 | 4.441 | 19.09 |
 Kept 0.3 s.
+
+## 2026-11-21 — severity-scaled drag-velocity bias random walk (rejected)
+Hypothesis: late-flight accel bias drift (aware) corrupts the drag velocity; a bias RW growing with s(t)
+absorbs it without explaining away early slow motion. MH_01/03/05 x 2 scen, seed 42:
+white-only ATE 3.872 BLIND 3.183; RW 0.05 s: 3.869 / 4.167; 0.1 s: 3.990 / 4.345; 0.2 s: 4.170 / 4.390.
+Rejected: blind error rises sharply. The white-noise drag measurement remains best.
+
+## 2026-11-21 — code review fixes (no accuracy change: 22 variants, seed 42, mean ATE 1.765, 0 contract issues)
+Guard for out-of-order / far-future timestamps (would have grown arrays without bound); t_end from
+accepted rows; utf-8-sig for folder inputs; dead code removed.
