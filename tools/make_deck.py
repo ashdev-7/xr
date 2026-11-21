@@ -1,218 +1,248 @@
-"""Build the submission deck (16:9 .pptx). Usage: python tools/make_deck.py <TEAM_NAME> "<member 1, member 2, ...>" """
-import sys
+"""Fill the organizers' submission template (CollegeName_TeamName deck) from results/report.json + figures/.
+
+usage: python tools/make_deck.py --team TEAM --college COLLEGE --members "A, B, C" [--repo URL]
+       [--template ../../Submission_Final_forGithub.pptx] [--out dist/CollegeName_TeamName.pptx]
+Every number on the slides comes from results/report.json (tools/bench/report.py on the final code).
+"""
+import argparse, json, os
 from pptx import Presentation
-from pptx.util import Inches, Pt, Emu
 from pptx.dml.color import RGBColor
 from pptx.enum.shapes import MSO_SHAPE, MSO_CONNECTOR
 from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
-from pptx.oxml.ns import qn
+from pptx.util import Inches, Pt
 
-TEAM = sys.argv[1] if len(sys.argv) > 1 else "CollegeName_TeamName"
-MEMBERS = sys.argv[2] if len(sys.argv) > 2 else "Member 1 · Member 2 · Member 3 · Member 4"
-INK, MUTED, ACCENT, RED, LIGHT = RGBColor(0x1F, 0x23, 0x28), RGBColor(0x57, 0x60, 0x6A), RGBColor(0x1F, 0x6F, 0xEB), RGBColor(0xD1, 0x24, 0x2F), RGBColor(0xF3, 0xF5, 0xF8)
-FONT = "Arial"
-prs = Presentation(); prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
-BLANK = prs.slide_layouts[6]
-W, H = prs.slide_width, prs.slide_height
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+BLUE, INK, GREY, RED, PALE = RGBColor(0x1F, 0x6F, 0xD1), RGBColor(0x20, 0x24, 0x2A), RGBColor(0x5F, 0x63, 0x68), \
+    RGBColor(0xD9, 0x30, 0x25), RGBColor(0xEE, 0xF3, 0xFB)
 
 
-def text(slide, x, y, w, h, runs, size=18, color=INK, bold=False, align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, spacing=1.1):
-    tb = slide.shapes.add_textbox(x, y, w, h); tf = tb.text_frame; tf.word_wrap = True
-    tf.vertical_anchor = anchor; tf.margin_left = tf.margin_right = Inches(0.05)
-    paras = runs if isinstance(runs, list) else [runs]
+def text(slide, x, y, w, h, paras, size=12, color=INK, bold_first=False, font="Calibri", align=PP_ALIGN.LEFT):
+    tb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
+    tf = tb.text_frame; tf.word_wrap = True
     for i, p in enumerate(paras):
         para = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
-        para.alignment = align; para.line_spacing = spacing
-        segs = p if isinstance(p, tuple) and isinstance(p[0], tuple) else (p if isinstance(p, tuple) else ((p, {}),))
-        if isinstance(p, str): segs = ((p, {}),)
-        for s, st in segs:
-            r = para.add_run(); r.text = s; f = r.font
-            f.name = FONT; f.size = Pt(st.get("size", size)); f.bold = st.get("bold", bold)
-            f.color.rgb = st.get("color", color)
-        para.space_after = Pt(st.get("after", 8) if segs else 8)
+        para.alignment = align
+        runs = p if isinstance(p, list) else [p]
+        for r in runs:
+            bold = False
+            if isinstance(r, tuple):
+                r, bold = r
+            run = para.add_run(); run.text = r
+            run.font.size = Pt(size); run.font.color.rgb = color; run.font.name = font
+            run.font.bold = bold or (bold_first and i == 0)
+        para.space_after = Pt(4)
     return tb
 
 
-def header(slide, title, kicker=None):
-    if kicker: text(slide, Inches(0.7), Inches(0.45), Inches(12), Inches(0.4), kicker, size=13, color=ACCENT, bold=True)
-    text(slide, Inches(0.7), Inches(0.75), Inches(12), Inches(1.0), title, size=32, bold=True)
-
-
-def footer(slide, n):
-    text(slide, Inches(0.7), Inches(7.0), Inches(9), Inches(0.3), f"PathGuard · Track 03 Path Finder · {TEAM}", size=10, color=MUTED)
-    text(slide, Inches(11.6), Inches(7.0), Inches(1.0), Inches(0.3), str(n), size=10, color=MUTED, align=PP_ALIGN.RIGHT)
-
-
-def box(slide, x, y, w, h, fill=LIGHT, line=None):
-    s = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, w, h)
-    s.adjustments[0] = 0.08; s.fill.solid(); s.fill.fore_color.rgb = fill
-    if line: s.line.color.rgb = line; s.line.width = Pt(1.25)
-    else: s.line.fill.background()
-    s.shadow.inherit = False
+def box(slide, x, y, w, h, title, sub, fill=PALE, line=BLUE):
+    s = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(x), Inches(y), Inches(w), Inches(h))
+    s.fill.solid(); s.fill.fore_color.rgb = fill; s.line.color.rgb = line; s.line.width = Pt(1)
+    tf = s.text_frame; tf.word_wrap = True; tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    tf.margin_left = tf.margin_right = Inches(0.06)
+    p = tf.paragraphs[0]; r = p.add_run(); r.text = title
+    r.font.size = Pt(11); r.font.bold = True; r.font.color.rgb = INK
+    for line in sub:
+        q = tf.add_paragraph(); rr = q.add_run(); rr.text = line; rr.font.size = Pt(8.5); rr.font.color.rgb = GREY
     return s
 
 
-def bullets(slide, x, y, w, h, items, size=18):
-    return text(slide, x, y, w, h, [(("•  ", {"color": ACCENT, "bold": True, "size": size}), (it, {"size": size})) for it in items], size=size)
+def arrow(slide, x1, y1, x2, y2):
+    c = slide.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, Inches(x1), Inches(y1), Inches(x2), Inches(y2))
+    c.line.color.rgb = BLUE; c.line.width = Pt(1.5)
+    ln = c.line._get_or_add_ln()
+    from pptx.oxml.ns import qn
+    tail = ln.makeelement(qn("a:tailEnd"), {"type": "triangle"}); ln.append(tail)
 
 
-def stat(slide, x, y, w, big, small, color=ACCENT):
-    text(slide, x, y, w, Inches(0.9), big, size=40, bold=True, color=color)
-    text(slide, x, y + Inches(0.85), w, Inches(0.8), small, size=14, color=MUTED)
+def table(slide, x, y, w, rows, colw=None, size=9):
+    nr, nc = len(rows), len(rows[0])
+    t = slide.shapes.add_table(nr, nc, Inches(x), Inches(y), Inches(w), Inches(0.25 * nr)).table
+    for i, row in enumerate(rows):
+        for j, v in enumerate(row):
+            cell = t.cell(i, j); cell.text = str(v)
+            for p in cell.text_frame.paragraphs:
+                for r in p.runs:
+                    r.font.size = Pt(size); r.font.bold = i == 0; r.font.color.rgb = INK
+            cell.margin_left = cell.margin_right = Inches(0.04)
+    if colw:
+        for j, cw in enumerate(colw):
+            t.columns[j].width = Inches(cw)
+    return t
 
 
-n = 0
-def new():
-    global n; n += 1; s = prs.slides.add_slide(BLANK)
-    if n > 1: footer(s, n)
-    return s
+def pic(slide, name, x, y, w=None, h=None):
+    p = os.path.join(ROOT, "figures", name)
+    if os.path.exists(p):
+        slide.shapes.add_picture(p, Inches(x), Inches(y), Inches(w) if w else None, Inches(h) if h else None)
 
-# 1 title
-s = new()
-bg = s.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, W, H); bg.fill.solid(); bg.fill.fore_color.rgb = INK; bg.line.fill.background()
-text(s, Inches(0.9), Inches(1.0), Inches(11), Inches(0.5), "SAMSUNG PRISM XR HACKATHON 2026  ·  THEME: TRACK 03, PATH FINDER", size=14, color=RGBColor(0x8A, 0xB4, 0xF8), bold=True)
-text(s, Inches(0.9), Inches(2.0), Inches(11.5), Inches(1.3), "PathGuard", size=66, bold=True, color=RGBColor(255, 255, 255))
-text(s, Inches(0.9), Inches(3.3), Inches(11.5), Inches(1.2), "Trust-aware inertial navigation under progressive sensor degradation", size=26, color=RGBColor(0xD0, 0xD7, 0xDE))
-text(s, Inches(0.9), Inches(5.3), Inches(11.5), Inches(0.5), TEAM, size=20, bold=True, color=RGBColor(255, 255, 255))
-text(s, Inches(0.9), Inches(5.8), Inches(11.5), Inches(0.5), MEMBERS, size=16, color=RGBColor(0xD0, 0xD7, 0xDE))
 
-# 2 problem
-s = new(); header(s, "Navigating with a sensor that is being jammed", "THE PROBLEM, IN OUR WORDS")
-bullets(s, Inches(0.7), Inches(1.9), Inches(7.2), Inches(4.8), [
-    "GPS is denied. The only sensor is an IMU: gyroscope (rotation) and accelerometer (push), 200 samples per second.",
-    "Jamming escalates over the mission: noise grows, sensor bias drifts, 2-second dropouts appear, and the IMU finally dies.",
-    "We must output the full 6-DoF path through every checkpoint, then dead-reckon 5 seconds with no sensor at all.",
-    "All of it in ≤ 8 MB of memory and ≤ 20 ms of compute per second of data, on one CPU thread, offline.",
-], size=19)
-box(s, Inches(8.4), Inches(1.95), Inches(4.25), Inches(4.4))
-text(s, Inches(8.7), Inches(2.2), Inches(3.7), Inches(0.4), "Why it is hard", size=16, bold=True, color=MUTED)
-stat(s, Inches(8.7), Inches(2.7), Inches(3.7), "0.01 m/s²", "of accelerometer bias becomes")
-stat(s, Inches(8.7), Inches(4.2), Inches(3.7), "≈ 100 m", "of position error within 2.5 minutes. Position comes from integrating acceleration twice.", RED)
+def set_text(shape, value, size=None):
+    tf = shape.text_frame
+    runs = [r for p in tf.paragraphs for r in p.runs]
+    if runs:
+        runs[0].text = value
+        for r in runs[1:]:
+            r.text = ""
+        if size:
+            runs[0].font.size = Pt(size)
 
-# 3 the trap
-s = new(); header(s, "The obvious solution ends up 15 km away", "THE TRAP")
-s.shapes.add_picture("figures/error_over_time.png", Inches(0.7), Inches(1.8), width=Inches(8.4))
-bullets(s, Inches(9.4), Inches(2.0), Inches(3.4), Inches(4.5), [
-    "Naive double integration of the degraded IMU: 15,345 m average error on unseen flights.",
-    "PathGuard stays bounded through all three dropouts and the blind window.",
-    "Same input, same flight: the difference is how much each step trusts the sensor.",
-], size=16)
 
-# 4 architecture
-s = new(); header(s, "PathGuard: five stages, one C++ file", "SOLUTION AND ARCHITECTURE")
-stages = [("1  Integrity layer", "Reject NaN, zero and frozen rows. Repair spikes. Find dropouts and the final failure."),
-          ("2  Self-calibration", "Gravity direction and gyro bias from the calmest early second. Gravity alignment is unknown."),
-          ("3  Attitude ESKF", "Forward and backward error-state Kalman passes, fused. Gravity corrects tilt; trust follows measured noise."),
-          ("4  Translation smoother", "Per-axis Kalman + RTS smoother on position, velocity, bias, workspace centre, with a learned motion prior."),
-          ("5  Blind forecast", "After failure: hold the last smoothed position, decay the last rotation rate.")]
-bw, gap, y0 = Inches(2.3), Inches(0.18), Inches(2.3)
-for i, (t, d) in enumerate(stages):
-    x = Inches(0.7) + i * (bw + gap)
-    box(s, x, y0, bw, Inches(2.9), fill=LIGHT, line=ACCENT if i in (3,) else None)
-    text(s, x + Inches(0.15), y0 + Inches(0.2), bw - Inches(0.3), Inches(0.8), t, size=16, bold=True, color=ACCENT if i == 3 else INK)
-    text(s, x + Inches(0.15), y0 + Inches(0.95), bw - Inches(0.3), Inches(1.9), d, size=13, color=MUTED)
-    if i < 4:
-        c = s.shapes.add_connector(MSO_CONNECTOR.STRAIGHT, x + bw, y0 + Inches(1.45), x + bw + gap, y0 + Inches(1.45))
-        c.line.color.rgb = ACCENT; c.line.width = Pt(2)
-        c.line._get_or_add_ln().append(c.line._get_or_add_ln().makeelement(qn("a:tailEnd"), {"type": "triangle"}))
-text(s, Inches(0.7), Inches(1.75), Inches(12), Inches(0.4), "imu0/data.csv  →", size=15, color=MUTED)
-text(s, Inches(0.7), Inches(5.45), Inches(12), Inches(1.2), [
-    (("Offline is a feature: ", {"bold": True}), ("we see the whole log, so both passes run forward and backward in time. A 2 s dropout is bridged from both sides instead of extrapolated blindly.", {})),
-    (("Output: ", {"bold": True}), ("estimated_trajectory.txt, one pose per IMU row (timestamp tx ty tz qx qy qz qw) plus 5 s of forecast.", {}))], size=15)
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--team", default="TeamName"); ap.add_argument("--college", default="CollegeName")
+    ap.add_argument("--members", default="Member 1, Member 2, Member 3, Member 4")
+    ap.add_argument("--repo", default="https://github.com/<user>/pathguard")
+    ap.add_argument("--template", default=os.path.join(ROOT, "..", "..", "Submission_Final_forGithub.pptx"))
+    ap.add_argument("--out", default=None)
+    a = ap.parse_args()
+    R = json.load(open(os.path.join(ROOT, "results", "report.json")))
+    test = R["test"]
 
-# 5 insight
-s = new(); header(s, "We measured what an IMU can see, then reached it", "KEY INSIGHT")
-s.shapes.add_picture("figures/floor.png", Inches(0.7), Inches(1.8), width=Inches(8.4))
-bullets(s, Inches(9.4), Inches(1.9), Inches(3.5), Inches(4.8), [
-    "The drone's room-scale loops take 20 to 40 s. In that band, bias and tilt errors swamp any IMU.",
-    "Oracle test: know every movement faster than 10 s perfectly, nothing slower. Best possible error: 3.39 m.",
-    "PathGuard: 3.39 m. The rest of the error is motion the sensor cannot observe, and we do not invent it.",
-], size=16)
+    def mean(method, cls, key):
+        rs = [r for r in R["methods"][method] if r["flight"] in test[cls]]
+        return sum(r[key] for r in rs) / len(rs)
 
-# 6 results
-s = new(); header(s, "Results on flights never used for tuning", "RESULTS")
-rows = [("Method", "ATE", "Waypoints", "Dropout", "Blind 5 s", "RPE 1 s"),
-        ("Naive double integration", "15,345", "14,766", "14,885", "37,792", "591"),
-        ("Stand still (no motion)", "3.51", "3.66", "3.56", "3.29", "0.79"),
-        ("PathGuard", "3.39", "3.53", "3.50", "3.28", "0.77")]
-tbl = s.shapes.add_table(len(rows), 6, Inches(0.7), Inches(1.9), Inches(11.9), Inches(2.4)).table
-tbl.columns[0].width = Inches(4.4)
-for j in range(1, 6): tbl.columns[j].width = Inches(1.5)
-for i, r in enumerate(rows):
-    for j, v in enumerate(r):
-        c = tbl.cell(i, j); c.text = v; p = c.text_frame.paragraphs[0]
-        p.alignment = PP_ALIGN.LEFT if j == 0 else PP_ALIGN.RIGHT
-        f = p.runs[0].font; f.name = FONT; f.size = Pt(17); f.bold = i in (0, 3)
-        f.color.rgb = RGBColor(255, 255, 255) if i == 0 else (ACCENT if i == 3 else INK)
-        c.fill.solid(); c.fill.fore_color.rgb = INK if i == 0 else (RGBColor(0xEA, 0xF2, 0xFE) if i == 3 else RGBColor(255, 255, 255))
-text(s, Inches(0.7), Inches(4.5), Inches(11.9), Inches(2.2), [
-    "Errors in metres. ATE: SE(3)-aligned absolute trajectory error (evo-style). RPE: translation drift over 1 s.",
-    "Test set: 5 EuRoC flights × 2 degradation styles (missing rows, dead rows at 1.5× severity). Tuning used 6 other flights only.",
-    "Degradation follows the brief: noise rising to 6×, bias drift, spikes, three 2 s dropouts, IMU failure 5 s before the end."], size=15, color=MUTED)
+    def abl(name, cls, key):
+        rs = [r for r in R["ablations"][name] if r["flight"] in test[cls]]
+        return sum(r[key] for r in rs) / len(rs)
 
-# 7 ablations
-s = new(); header(s, "The motion prior and the forecast choice, measured", "WHAT EACH PIECE BUYS")
-s.shapes.add_picture("figures/ablation_prior.png", Inches(0.7), Inches(1.9), width=Inches(6.0))
-s.shapes.add_picture("figures/blind.png", Inches(6.9), Inches(1.9), width=Inches(6.0))
-text(s, Inches(0.7), Inches(5.3), Inches(5.9), Inches(1.5), "The motion prior is the core: without it the same filter drifts to 155 m.", size=15, color=MUTED)
-text(s, Inches(6.9), Inches(5.3), Inches(5.9), Inches(1.5), "Blind 5 s: holding the last position beats constant-velocity extrapolation by 43%. A guessed velocity after jamming does more harm than good.", size=15, color=MUTED)
+    rs = R["resources"]
+    prs = Presentation(a.template)
+    S = prs.slides
 
-# 8 edge
-s = new(); header(s, "Built for the edge from day one", "EXECUTION AND EFFICIENCY")
-stat(s, Inches(0.7), Inches(2.0), Inches(3.8), "3.1 MB", "peak memory on a 3-minute flight (budget 8 MB)")
-stat(s, Inches(4.7), Inches(2.0), Inches(3.8), "0.6 ms", "compute per second of IMU (budget 20 ms)")
-stat(s, Inches(8.7), Inches(2.0), Inches(3.8), "0 crashes", "across every malformed-input test")
-bullets(s, Inches(0.7), Inches(4.0), Inches(12), Inches(2.8), [
-    "Single-threaded, offline, one dependency-free C++17 file; static build. main.py launches the same binary.",
-    "Lean storage: quaternions packed in int16, filter covariances in float, translation smoothed at 10 Hz, prediction recomputed in the RTS pass.",
-    "Survives: NaN rows, all-zero rows, frozen rows, spikes, missing rows, duplicated rows, no '#' header, CRLF, spaces, a 300-row file.",
-    "Exactly one pose per input row, exact nanosecond-to-second timestamps, unit quaternions.",
-], size=16)
+    # 1 title
+    s = S[0]
+    for sh in s.shapes:
+        if not sh.has_text_frame:
+            continue
+        t = sh.text_frame.text
+        if t.startswith("Track No"):
+            set_text(sh, "TRACK 03")
+        elif t.startswith("XR Hackathon"):
+            set_text(sh, "PathGuard: trajectory estimation under sensor degradation", 26)
+        elif t.startswith("Team Name"):
+            tf = sh.text_frame
+            runs = [r for p in tf.paragraphs for r in p.runs]
+            if len(runs) >= 2:
+                runs[0].text = a.team; runs[1].text = a.college
+            else:
+                set_text(sh, f"{a.team}\n{a.college}")
+        elif t.startswith("Members"):
+            set_text(sh, "Members: " + a.members, 11)
 
-# 9 honest view
-s = new(); header(s, "What PathGuard will and will not claim", "HONEST BY DESIGN")
-s.shapes.add_picture("figures/top_view.png", Inches(0.7), Inches(1.6), height=Inches(5.3))
-bullets(s, Inches(6.7), Inches(2.0), Inches(6.0), Inches(4.8), [
-    "Top view of an unseen flight. The true loop spans about 6 m; PathGuard's estimate stays compact.",
-    "That is deliberate. The IMU cannot observe the slow loop, so an estimator that draws a big confident loop is guessing, and guesses score worse.",
-    "PathGuard follows the fast motion the sensor really measures, and shrinks toward the workspace where it cannot know.",
-    "In a real aircraft this is the difference between an honest uncertainty and a confident wrong position.",
-], size=16)
+    # 2 problem
+    s = S[1]
+    text(s, 0.4, 1.0, 4.3, 4.3, [
+        [("An aircraft's only sensor is a jammed IMU. ", True), "Noise, bias and scale drift, spikes, frozen samples and "
+         "dropped frames all grow over the flight until the IMU dies; then 5 s must be dead-reckoned."],
+        [("Output: ", True), "a 6-DoF pose for every IMU row (including duplicated and dead rows), TUM format, scored with "
+         "evo (ATE after SE(3) alignment, RPE)."],
+        [("Physics is the enemy: ", True), "double integration turns a 0.01 m/s² bias into 50 m after 100 s; "
+         "slow motion is invisible to an IMU alone."],
+        [("Budgets: ", True), "≤ 8 MB heap, ≤ 20 ms per 1 s of IMU, one CPU thread, offline, Python only."],
+    ], size=11)
+    pic(s, "degradation.png", 4.8, 1.05, w=5.0)
 
-# 10 stack + validation
-s = new(); header(s, "Tools, tech stack and how we validated", "TECH STACK")
-box(s, Inches(0.7), Inches(1.9), Inches(5.8), Inches(4.7))
-text(s, Inches(1.0), Inches(2.1), Inches(5.3), Inches(0.5), "Stack", size=18, bold=True)
-bullets(s, Inches(1.0), Inches(2.7), Inches(5.3), Inches(3.8), [
-    "C++17, no libraries (estimator)", "Python + NumPy/SciPy (data, scoring, tuning)", "evo-style ATE / RPE scorer, reimplemented",
-    "EuRoC MAV ground truth (11 flights)", "Make, Docker, Matplotlib", "Claude (AI assistant) for research and scaffolding"], size=16)
-box(s, Inches(6.8), Inches(1.9), Inches(5.8), Inches(4.7))
-text(s, Inches(7.1), Inches(2.1), Inches(5.3), Inches(0.5), "Validation", size=18, bold=True)
-bullets(s, Inches(7.1), Inches(2.7), Inches(5.3), Inches(3.8), [
-    "200 Hz IMU synthesised from ground truth with the dataset's own biases, sensor noise and propeller vibration.",
-    "Degradation generator that follows the brief, two dropout styles.",
-    "Split by flight: tuned on 6, reported on 5 unseen.",
-    "Baselines, oracle floor, ablations, memory/runtime and malformed-input tests, all scripted and reproducible."], size=16)
+    # 3 solution
+    s = S[2]
+    ideas = [
+        ("Read the jamming from packet loss.", "Every impairment shares one severity curve; dropped rows reveal it even "
+         "when rotor vibration hides the noise. Trust follows the measured severity."),
+        ("A drone's accelerometer measures its velocity.", "Thrust acts along one axis, so the horizontal specific force is "
+         "rotor drag f⊥ = −μ v⊥ (μ ≈ 0.18 1/s). Position error grows linearly, not quadratically."),
+        ("Spikes have a signature.", "The jammer spikes all six channels in the same sample: precision 0.97 vs 0.16 for a "
+         "per-channel rule."),
+        ("Rest is information.", "Detected rest gives zero-velocity and zero-angular-rate updates (gyro bias incl. heading)."),
+        ("Smooth, don't filter.", "Error-state RTS smoothers for attitude and position use the whole log, bridging dropouts "
+         "from both sides."),
+        ("Platform-aware priors.", "Rotor vibration identifies the platform; motion priors are learned per class on TRAIN "
+         "flights only."),
+    ]
+    y = 1.0
+    for i, (h, b) in enumerate(ideas, 1):
+        text(s, 0.4, y, 9.2, 0.7, [[(f"{i}. {h} ", True), b]], size=11); y += 0.72
 
-# 11 innovation
-s = new(); header(s, "Innovation highlights", "WHAT IS NEW")
-items = [("Trust as a state", "Each stage estimates how much to believe the sensor now: integrity checks, noise-scaled filter trust, motion prior where the IMU is blind."),
-         ("Offline both ways", "Forward-backward attitude fusion and RTS smoothing: dropouts are bridged with data from both sides."),
-         ("A measured ceiling", "We quantified the IMU-only floor with an oracle and showed PathGuard reaches it, instead of claiming a vague improvement."),
-         ("Edge-native", "3 MB and 0.6 ms per second of data: the compliance budget is met with large margins, not squeezed.")]
-for i, (t, d) in enumerate(items):
-    x = Inches(0.7) + (i % 2) * Inches(6.1); y = Inches(1.9) + (i // 2) * Inches(2.45)
-    box(s, x, y, Inches(5.8), Inches(2.2))
-    text(s, x + Inches(0.3), y + Inches(0.2), Inches(5.2), Inches(0.5), t, size=19, bold=True, color=ACCENT)
-    text(s, x + Inches(0.3), y + Inches(0.8), Inches(5.2), Inches(1.4), d, size=15, color=MUTED)
+    # 4 architecture
+    s = S[3]
+    bx = [("Pass 1: stream", ["format & units", "integrity: NaN, dead,", "frozen, dup, spikes", "jamming meter", "20 ms preintegration"]),
+          ("Platform", ["rotor-vibration", "signature →", "rotorcraft /", "handheld prior"]),
+          ("Attitude", ["ESKF [δθ, b_g]", "gravity + rest", "updates", "error-state RTS"]),
+          ("Translation", ["KF + RTS, 10 Hz", "[p, v, b_a, c]", "motion prior, ZUPT", "rotor-drag velocity", "blind: no-data smoother"]),
+          ("Pass 2: write", ["1 pose per row", "exact ns → s", "Hermite position", "never malformed"])]
+    x = 0.35
+    for i, (t, sub) in enumerate(bx):
+        box(s, x, 1.35, 1.7, 2.1, t, sub)
+        if i < len(bx) - 1:
+            arrow(s, x + 1.7, 2.4, x + 1.9, 2.4)
+        x += 1.9
+    text(s, 0.4, 3.75, 9.2, 1.6, [
+        "Pure-Python standard library, one file, two streaming passes. Memory grows with 20 ms bins and 10 Hz knots, "
+        "not with rows. Each block was kept only because it improved held-out flights (EXPERIMENTS.md); "
+        "rejected ideas are logged too.",
+        f"Measured: {rs[0]['ms_per_s']:.1f} ms per 1 s of IMU, estimator heap {rs[0]['data_heap_mb']:.1f} MB "
+        f"({rs[0]['flight'].replace('_', ' ')}, {rs[0]['duration_s']:.0f} s flight)."], size=11, color=GREY)
 
-# 12 limitations
-s = new(); header(s, "Limitations and next steps", "LIMITATIONS")
-bullets(s, Inches(0.7), Inches(1.9), Inches(12), Inches(4.8), [
-    "IMU-only cannot observe slow room-scale motion; absolute error stays near 3.4 m on EuRoC for that reason.",
-    "Development IMU was synthesised from ground truth; parameters may need re-tuning for the organizers' degradation script.",
-    "Memory grows about 48 bytes per IMU row: inputs up to about 12 minutes at 200 Hz fit in 8 MB.",
-    "Next: a small learned motion prior (TLIO-style, a few hundred KB) to push below the 10 s oracle; any absolute aiding (barometer, magnetometer, a camera checkpoint) would cut error sharply, and the smoother already accepts such updates.",
-], size=18)
+    # 5 final output
+    s = S[4]
+    text(s, 0.4, 1.0, 4.4, 1.2, ["estimated_trajectory.txt (one pose per IMU frame):",
+                                 "# timestamp tx ty tz qx qy qz qw",
+                                 "1403636579.758555392 0.012 0.004 0.010 0.0001 0.0023 0.0011 0.9999"], size=9, font="Consolas")
+    rows = [["TEST flights", "method", "ATE [m]", "blind 5 s [m]", "RPE 1 s [m]"]]
+    for cls, lab in (("rotor", "EuRoC MAV"), ("handheld", "TUM-VI room")):
+        for m in ("naive integration", "stand-still", "PathGuard"):
+            ate = mean(m, cls, "ate")
+            rows.append([lab, m, f"{ate:.0f}" if ate > 100 else f"{ate:.2f}", f"{mean(m, cls, 'blind'):.2f}" if mean(m, cls, 'blind') < 100 else f"{mean(m, cls, 'blind'):.0f}",
+                         f"{mean(m, cls, 'rpe_t'):.2f}" if mean(m, cls, 'rpe_t') < 100 else f"{mean(m, cls, 'rpe_t'):.0f}"])
+    table(s, 0.4, 2.2, 4.4, rows, colw=[1.0, 1.25, 0.65, 0.85, 0.65], size=8)
+    pic(s, "top_view.png", 4.95, 1.0, w=4.9)
+    text(s, 4.95, 4.7, 4.9, 0.6, ["Real EuRoC / TUM-VI IMU degraded by the official script (2 column scenarios × 3 seeds); "
+                                  "flights never used for tuning."], size=8, color=GREY)
 
-prs.save(f"{TEAM}.pptx"); print(f"saved {TEAM}.pptx")
+    # 6 differentiation
+    s = S[5]
+    rows = [["", "typical approach", "PathGuard"],
+            ["slow drift", "double integration explodes", "per-platform motion prior + rotor-drag velocity"],
+            ["jamming", "fixed noise model", "severity measured from packet loss"],
+            ["spikes", "per-channel threshold (deletes motion)", "six-channel signature (precision 0.97)"],
+            ["drones", "IMU = acceleration only", "IMU = velocity too (rotor drag)"],
+            ["offline", "causal filter", "RTS smoothing over the whole log"],
+            ["budget", "numpy import alone ≈ 7.4 MB", f"stdlib only, {rs[0]['data_heap_mb']:.1f} MB, {rs[0]['ms_per_s']:.1f} ms/s"],
+            ["output", "may crash on bad rows", "18 malformed-input tests; always 1 pose per row"]]
+    table(s, 0.4, 1.05, 9.2, rows, colw=[1.2, 3.2, 4.8], size=9)
+    pic(s, "error_over_time.png", 1.2, 3.35, w=7.6)
+
+    # 7 demo & setup
+    s = S[6]
+    text(s, 0.4, 1.0, 9.2, 4.2, [
+        [("Repository: ", True), a.repo],
+        "python src/main.py <imu0/data.csv | dataset folder | .zip> estimated_trajectory.txt",
+        "python src/main.py data.csv out.txt --verbose=1        # diagnostics: platform, jamming, integrity",
+        "docker build -t pathguard src/ && docker run --rm -v $PWD/eval:/data pathguard /data/imu0/data.csv /data/estimated_trajectory.txt",
+        "python tests/test_contract.py   # 18 input variants      python tests/test_eskf.py   # filter unit test",
+        "python tools/bench/report.py    # regenerates every number in README and this deck",
+        [("Requirements: ", True), "Python ≥ 3.8, nothing else. CI runs 3.8–3.13 and the Docker build on every push."],
+    ], size=10, font="Consolas")
+
+    # 8 brownie
+    s = S[7]
+    pic(s, "rotor_drag.png", 0.3, 0.95, w=5.6)
+    rows = [["ablation (TEST)", "rotor ATE / blind", "handheld ATE / blind"]]
+    for name in R["ablations"]:
+        rows.append([name, f"{abl(name, 'rotor', 'ate'):.2f} / {abl(name, 'rotor', 'blind'):.2f}",
+                     f"{abl(name, 'handheld', 'ate'):.2f} / {abl(name, 'handheld', 'blind'):.2f}"])
+    table(s, 6.0, 1.0, 3.7, rows, colw=[1.7, 1.0, 1.0], size=7)
+    text(s, 0.4, 3.0, 5.5, 2.4, [
+        [("Validation: ", True), "real public IMU, the unmodified official degradation script (bit-identical labels for "
+         "spikes / frozen / duplicates), TRAIN/TEST split by flight, scorer equal to evo_ape to 4 decimals."],
+        [("Honesty: ", True), "rejected ideas are logged (body-frame bias model, Gauss–Markov drag error, scenario-specific "
+         "bias models). The estimator never reads ground truth."],
+    ], size=10)
+
+    out = a.out or os.path.join(ROOT, "dist", f"{a.college}_{a.team}.pptx")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    prs.save(out)
+    print("deck:", out)
+
+
+if __name__ == "__main__":
+    main()
