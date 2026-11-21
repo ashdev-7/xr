@@ -13,10 +13,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from run import run  # noqa: E402
 
-TRAIN = ["TUMVI_room1", "TUMVI_room3", "TUMVI_room5", "MH_01_easy", "MH_03_medium", "MH_05_difficult",
-         "V1_01_easy", "V2_02_medium"]
-TEST = ["TUMVI_room2", "TUMVI_room4", "TUMVI_room6", "V1_02_medium", "MH_02_easy", "MH_04_difficult",
-        "V1_03_difficult", "V2_01_easy", "V2_03_difficult"]
+SPLITS = {  # split by flight; TEST flights are never used to choose parameters
+    "handheld": (["TUMVI_room1", "TUMVI_room3", "TUMVI_room5"], ["TUMVI_room2", "TUMVI_room4", "TUMVI_room6"]),
+    "rotor": (["MH_01_easy", "MH_03_medium", "MH_05_difficult", "V1_01_easy", "V2_02_medium"],
+              ["MH_02_easy", "MH_04_difficult", "V1_02_medium", "V1_03_difficult", "V2_01_easy", "V2_03_difficult"]),
+}
+SPLITS["all"] = (SPLITS["handheld"][0] + SPLITS["rotor"][0], SPLITS["handheld"][1] + SPLITS["rotor"][1])
 W = dict(wp=0.5, blind=1 / 3, drop=1 / 6)
 _still = {}
 
@@ -48,22 +50,24 @@ if __name__ == "__main__":
     sys.path.insert(0, os.path.join(HERE, "..", "..", "src"))
     import main as M
     a = sys.argv[1:]
-    rounds, names, seeds, start = 2, None, (42, 1), {}
+    rounds, names, seeds, start, cls = 2, None, (42, 1), {}, "all"
     while a:
         x = a.pop(0)
         if x == "--rounds": rounds = int(a.pop(0))
         elif x == "--params": names = a.pop(0).split(",")
         elif x == "--seeds": seeds = tuple(int(s) for s in a.pop(0).split(","))
+        elif x == "--cls": cls = a.pop(0)
         elif x.startswith("--") and "=" in x:
             k, v = x[2:].split("=", 1); start[k] = float(v)
     bench = os.path.join(HERE, "..", "..", "data", "bench")
     have = set(os.listdir(bench))
-    train = [f for f in TRAIN if f in have]
-    test = [f for f in TEST if f in have]
+    train = [f for f in SPLITS[cls][0] if f in have]
+    test = [f for f in SPLITS[cls][1] if f in have]
     print("TRAIN:", train, "\nTEST:", test, flush=True)
     names = names or ["sig_v_h", "sig_p_h", "sig_v_z", "sig_p_z", "sig_a", "ba_rw", "ba_k", "ba_kz", "sig_c",
-                      "tilt_sig", "tilt_k", "bg0_sig", "bg_rw", "bg_k", "sig_gap"]
-    cur = {k: float(start.get(k, M.P[k])) for k in names}
+                      "tilt_sig", "tilt_k", "bg0_sig", "bg_rw", "bg_k", "sig_gap"] + (["drag_sig", "drag_mu"] if cls == "rotor" else [])
+    preset = M.PRESETS[1 if cls == "rotor" else 0]
+    cur = {k: float(start.get(k, preset.get(k, M.P[k]))) for k in names}
     cur.update({k: v for k, v in start.items()})
     base = lambda p: [f"--{k}={v:.6g}" for k, v in p.items()]
     t0 = time.time()
@@ -88,4 +92,4 @@ if __name__ == "__main__":
     print(f"FINAL J_train={J:.4f} J_test={Jte:.4f}\n{fmt(cur)}", flush=True)
     os.makedirs(os.path.join(HERE, "..", "..", "results"), exist_ok=True)
     json.dump(dict(final=cur, J_train=J, J_test=Jte, log=log, train=train, test=test),
-              open(os.path.join(HERE, "..", "..", "results", "tune_last.json"), "w"), indent=1)
+              open(os.path.join(HERE, "..", "..", "results", f"tune_{cls}.json"), "w"), indent=1)
