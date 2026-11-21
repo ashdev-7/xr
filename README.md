@@ -89,7 +89,18 @@ RESULTS PENDING FINAL RUN.
 
 ## Limitations
 
-RESULTS PENDING FINAL RUN.
+- **Slow motion is fundamentally hard to observe with an IMU alone.** On handheld data PathGuard falls back to a
+  learned motion prior for periods beyond ~10–20 s. On drones the rotor-drag model recovers much of it, but
+  not all (the drag model's own error is correlated over seconds; see EXPERIMENTS.md).
+- **The drag coefficient is learned for the EuRoC hexacopter** (μ ≈ 0.18 s⁻¹, the same on every flight).
+  Another airframe would need re-fitting; the platform classifier would still detect it as a rotorcraft.
+- **The end of the flight is the weakest part.** Jamming is strongest there, and the blind 5 s inherits the
+  position error at the moment of failure.
+- **Heading is only weakly observable** without rest periods (the gyro bias about gravity).
+- **Assumptions:** the degradation behaves like the official script (one severity ramp, short dropouts,
+  zeroed rows after failure). Long dropouts would be bridged by the motion prior alone, which we did not tune for.
+- **Memory accounting:** the estimator's own data peaks at ~1.5–2.5 MB. If the interpreter's compilation of
+  `main.py` (a fixed ~7 MB, transient, before any data is read) is counted too, the traced peak is ~7.7 MB.
 
 ## Repository layout
 
