@@ -161,3 +161,10 @@ GT: every EuRoC flight ends within 0.01-0.26 m of its start (spread 1.8-6.9 m); 
 x 2 scen, seed 42, sig_p_h 10: off 3.345 (BLIND 2.351); sigma 1 m: 3.214 (2.318); 0.3 m: 3.197 (2.383).
 Rejected: a -4.4 % gain does not justify a dataset-behaviour assumption (the task describes an aircraft
 flying to a target) that would fail badly on a non-returning flight. Not in src/main.py.
+
+## 2026-11-21 — rotorcraft class tuning, round 1 (kept)
+TRAIN MH_01/03/05 (2 scen x seeds 42, 1), start sig_p_h 10: J_train 0.7590 -> 0.6389
+(sig_v_h 2, sig_a 0.2, ba_rw 0.02, ba_k 0.02, sig_c 0.1, tilt_sig 0.25, tilt_k 2, sig_gap 6).
+Held-out MH_02, MH_04, V1_02, V1_01 (2 scen x 3 seeds): J 0.8647 -> 0.7617, ATE 2.887 -> 2.651,
+BLIND 2.265 -> 1.867. Per flight ATE: MH_02 3.878 -> 3.937, MH_04 4.310 -> 3.729, V1_02 1.199 -> 1.341,
+V1_01 2.162 -> 1.598.
