@@ -193,3 +193,8 @@ V1_01 2.162 -> 1.598.
    Conclusion: amplitude is not identifiable from the IMU alone; keep the tuned compromise. drag_loglik and
    roam statistics are kept as verbose diagnostics only.
 3. Unit scale (g vs m/s^2, s/ms/us/ns): auto-detected, covered by tests/test_contract.py.
+
+## 2026-11-21 — thrust-scaled drag coefficient (not adopted, negligible)
+mu(t) = mu0 (f_thrust / mean)^e (literature: drag ~ rotor speed). 9 EuRoC flights x 2 scen, seed 42:
+e = 0: ATE 2.600 BLIND 1.961; e = 0.5: 2.598 / 1.954; e = 1: 2.595 / 1.948. Kept e = 0 (simplicity).
+Held-out V2_01 (seed 42): ATE aware 2.053 / asis 2.219 vs stand-still 2.295.

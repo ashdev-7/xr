@@ -68,6 +68,7 @@ P = dict(
     drag=1,             # use the rotor-drag velocity measurement when the platform is a rotorcraft
     drag_mu=0.18,       # linear drag coefficient [1/s] (fitted on TRAIN flights: 0.18-0.20)
     drag_sig=1.2,       # velocity noise of one 10 Hz drag measurement [m/s]
+    drag_thrust=0.0,    # exponent of the thrust scaling mu * (f_thrust / mean)^e (0 = constant mu)
     drag_vib=0.4,       # rotors spinning and airborne when accel vibration exceeds this [m/s^2]
     # platform: -1 auto (rotor vibration signature), 0 handheld/ground, 1 rotorcraft
     platform=-1,
@@ -962,12 +963,14 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
             u = (su[0] / nu, su[1] / nu, su[2] / nu)
             dvel = array("d", bytes(8 * 2 * K))
             mu = P["drag_mu"]
+            gm = sum(kfb[3 * j] * u[0] + kfb[3 * j + 1] * u[1] + kfb[3 * j + 2] * u[2] for j in range(K) if air[j]) / max(1, sum(air))
             for j in range(K):
                 if not air[j]:
                     continue
                 f0, f1, f2 = kfb[3 * j], kfb[3 * j + 1], kfb[3 * j + 2]
                 fu = f0 * u[0] + f1 * u[1] + f2 * u[2]
-                vb = (-(f0 - fu * u[0]) / mu, -(f1 - fu * u[1]) / mu, -(f2 - fu * u[2]) / mu)
+                mj = mu * (fu / gm) ** P["drag_thrust"] if fu > 0.5 * gm else mu  # drag grows with rotor thrust
+                vb = (-(f0 - fu * u[0]) / mj, -(f1 - fu * u[1]) / mj, -(f2 - fu * u[2]) / mj)
                 bm = min(nb, j * per + per // 2)
                 vw = qrot((qs[4 * bm], qs[4 * bm + 1], qs[4 * bm + 2], qs[4 * bm + 3]), vb)
                 dvel[2 * j] = vw[0]; dvel[2 * j + 1] = vw[1]
