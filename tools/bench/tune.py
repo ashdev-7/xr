@@ -19,6 +19,10 @@ SPLITS = {  # split by flight; TEST flights are never used to choose parameters
               ["MH_02_easy", "MH_04_difficult", "V1_02_medium", "V1_03_difficult", "V2_01_easy", "V2_03_difficult"]),
 }
 SPLITS["all"] = (SPLITS["handheld"][0] + SPLITS["rotor"][0], SPLITS["handheld"][1] + SPLITS["rotor"][1])
+# final fit (after the method was validated on held-out flights): every public flight of the class; the
+# "test" score of these splits is in-sample and is NOT a generalization estimate
+for _c in ("rotor", "handheld"):
+    SPLITS[_c + "_final"] = (SPLITS[_c][0] + SPLITS[_c][1], SPLITS[_c][0] + SPLITS[_c][1])
 W = dict(wp=0.5, blind=1 / 3, drop=1 / 6)
 _still = {}
 
@@ -65,8 +69,8 @@ if __name__ == "__main__":
     test = [f for f in SPLITS[cls][1] if f in have]
     print("TRAIN:", train, "\nTEST:", test, flush=True)
     names = names or ["sig_v_h", "sig_p_h", "sig_v_z", "sig_p_z", "sig_a", "ba_rw", "ba_k", "ba_kz", "sig_c",
-                      "tilt_sig", "tilt_k", "bg0_sig", "bg_rw", "bg_k", "sig_gap"] + (["drag_sig", "drag_mu"] if cls == "rotor" else [])
-    preset = M.PRESETS[1 if cls == "rotor" else 0]
+                      "tilt_sig", "tilt_k", "bg0_sig", "bg_rw", "bg_k", "sig_gap"] + (["drag_sig", "drag_mu"] if cls.startswith("rotor") else [])
+    preset = M.PRESETS[1 if cls.startswith("rotor") else 0]
     cur = {k: float(start.get(k, preset.get(k, M.P[k]))) for k in names}
     cur.update({k: v for k, v in start.items()})
     base = lambda p: [f"--{k}={v:.6g}" for k, v in p.items()]

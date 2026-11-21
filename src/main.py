@@ -83,8 +83,8 @@ P = dict(
 PRESETS = {
     1: dict(sig_v_h=4.0, sig_p_h=10.0, sig_a=0.4, ba_rw=0.04, ba_k=0.04, sig_c=0.05, tilt_sig=0.25, tilt_k=2.0,
             sig_gap=6.0, bg0_sig=0.005, blind_tau=0.0),  # rotorcraft (tuned on MH_01/03/05, V1_01, V2_02)
-    0: dict(sig_v_h=1.96, sig_p_h=1.5, sig_a=0.1, ba_rw=0.02, ba_k=0.028, sig_c=0.1, tilt_sig=0.25,
-            bg0_sig=0.005),  # handheld (tuned on TUM-VI room1/3/5; TEST room2/4/6 J 0.679 -> 0.674)
+    0: dict(sig_v_h=1.96, sig_p_h=1.5, sig_a=0.05, ba_rw=0.02, ba_k=0.028, sig_c=0.1, tilt_sig=0.25,
+            bg0_sig=0.005),  # handheld (tuned on room1/3/5, validated on room2/4/6; final refit on all six: sig_a 0.1 -> 0.05)
 }
 CLI_SET = set()  # parameters given on the command line override the presets
 

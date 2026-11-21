@@ -306,3 +306,10 @@ whitespace): output bit-identical on MH_02 aware and room4 asis; ~4.6-5.1 ms/s (
 Total traced peak including CPython's compile of main.py: 7.78 MB, of which compile ~6.8 MB (transient, scales
 with file size; half the file 2.6 MB). Not changed: splitting into modules would cut it to ~2.5 MB only if the
 organizers trace compilation, and the FAQ says data structures/buffers are measured.
+
+## 2026-11-22 — final refit on all public flights (objective = official 30/20/10 weights)
+tune.py --cls rotor_final (11 EuRoC) / handheld_final (6 TUM-VI rooms), seeds 42 and 1, 2 rounds. Flat optimum:
+rotor J 0.7710 -> 0.7681 (only sig_v_h 4 -> 2); handheld J 0.6103 -> 0.6076 (only sig_a 0.1 -> 0.05).
+Checked on unseen seed 2 and on the 2 s-gap variants: rotor sig_v_h 2 worse (seed 2 ATE 2.472 -> 2.514, gaps
+2.611 -> 2.638) -> rejected (in-sample noise); handheld sig_a 0.05 better on seed 2 (0.461 -> 0.457), gaps
+neutral (0.802 -> 0.802) -> adopted.
