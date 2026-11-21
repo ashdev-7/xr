@@ -51,8 +51,15 @@ P = dict(
     sig_p_z=0.5,        # workspace prior, vertical [m]
     # integrity
     spike_k=8.0,        # spike threshold in robust sigmas (must hold on all 6 channels)
+    # still detection (zero-velocity / zero-angular-rate updates), 0.5 s windows
+    still_g=0.04,       # max gyro std [rad/s]
+    still_a=1.0,        # max accel std [m/s^2]
+    still_dg=0.3,       # max | |mean f| - g | [m/s^2]
+    zupt_sig=0.02,      # zero-velocity pseudo-measurement noise [m/s]
+    zaru_sig=0.002,     # zero-angular-rate measurement noise floor [rad/s]
+    still_tilt=0.02,    # gravity-direction noise while still [rad]
     # features
-    backward=1, adapt=1, repair=1, verbose=0,
+    backward=1, adapt=1, repair=1, still=1, verbose=0,
 )
 
 
@@ -366,6 +373,8 @@ def preintegrate(opener, info, sg, sa, T_L):
     buf = []  # last 5 valid rows
     last = None
     stats = dict(dead=0, frozen=0, spikes=0, valid=0, nan=0)
+    nwin = int(T_L / 0.5) + 1
+    ws = array("d", bytes(8 * 13 * nwin))  # per 0.5 s window: n, sum w(3), sum w^2(3), sum f(3), sum f^2(3)
 
     def emit(r):
         t = r[0]
@@ -374,6 +383,12 @@ def preintegrate(opener, info, sg, sa, T_L):
         b = int(t / bdt)
         if b >= nb:
             b = nb - 1
+        o = 13 * min(nwin - 1, int(t * 2.0))
+        ws[o] += 1.0
+        ws[o + 1] += r[1]; ws[o + 2] += r[2]; ws[o + 3] += r[3]
+        ws[o + 4] += r[1] * r[1]; ws[o + 5] += r[2] * r[2]; ws[o + 6] += r[3] * r[3]
+        ws[o + 7] += r[4]; ws[o + 8] += r[5]; ws[o + 9] += r[6]
+        ws[o + 10] += r[4] * r[4]; ws[o + 11] += r[5] * r[5]; ws[o + 12] += r[6] * r[6]
         i3 = 3 * b
         gsum[i3] += r[1]; gsum[i3 + 1] += r[2]; gsum[i3 + 2] += r[3]
         asum[i3] += r[4]; asum[i3 + 1] += r[5]; asum[i3 + 2] += r[6]
@@ -428,7 +443,35 @@ def preintegrate(opener, info, sg, sa, T_L):
     # flush: the last <=4 rows before the failure have no two-sided window; keep them
     for r in buf:
         emit(r)
-    return gsum, asum, cnt, nb, stats
+    return gsum, asum, cnt, nb, stats, ws, nwin
+
+
+def still_windows(ws, nwin, gmag):
+    """0.5 s windows in which the body is at rest: low gyro and accel spread and |f| ~ g.
+    Chosen on ground-truth-labelled windows for ~zero false positives (a false zero-velocity
+    update in flight would hurt far more than a missed one). A window counts only if a
+    neighbour is also still (>= 1 s of rest)."""
+    dt_nom = INFO["dt_nom"]
+    raw = array("b", bytes(nwin))
+    for k in range(nwin):
+        o = 13 * k
+        n = ws[o]
+        if n < 0.6 * 0.5 / dt_nom:
+            continue
+        vg = va = 0.0
+        for c in range(3):
+            m = ws[o + 1 + c] / n
+            vg += max(0.0, ws[o + 4 + c] / n - m * m)
+            m = ws[o + 7 + c] / n
+            va += max(0.0, ws[o + 10 + c] / n - m * m)
+        fm = math.sqrt(sum((ws[o + 7 + c] / n) ** 2 for c in range(3)))
+        if math.sqrt(vg) < P["still_g"] and math.sqrt(va) < P["still_a"] and abs(fm - gmag) < P["still_dg"]:
+            raw[k] = 1
+    out = array("b", bytes(nwin))
+    for k in range(nwin):
+        if raw[k] and ((k > 0 and raw[k - 1]) or (k + 1 < nwin and raw[k + 1])):
+            out[k] = 1
+    return out
 
 
 # ----------------------------------------------------------------------------- rotation helpers
@@ -570,6 +613,27 @@ class Att:
                   (b20 - dt * e20, b21 - dt * e21, b22 - dt * e22))
         self.C = ((c00 + qb2, c01, c02), (c01, c11 + qb2, c12), (c02, c12, c22 + qb2))
 
+    def zero_rate(self, w, sig):
+        """At rest the true rate is zero: z = w - bg ~ N(0, sig^2) measures the gyro bias on all three axes
+        (including the one about gravity, which tilt updates cannot see). H = [0 I]."""
+        A, B, C = self.A, self.B, self.C
+        z = (w[0] - self.bg[0], w[1] - self.bg[1], w[2] - self.bg[2])
+        S = m3add(C, diag3(sig * sig))
+        Si = m3inv(S)
+        if Si is None:
+            return
+        KA = m3mul(B, Si)          # gain for dtheta  (3x3) = B S^-1
+        KC = m3mul(C, Si)          # gain for dbg     (3x3) = C S^-1
+        dth = tuple(KA[i][0] * z[0] + KA[i][1] * z[1] + KA[i][2] * z[2] for i in range(3))
+        dbg = tuple(KC[i][0] * z[0] + KC[i][1] * z[1] + KC[i][2] * z[2] for i in range(3))
+        self.q = qnorm(qmul(qexp(dth[0], dth[1], dth[2]), self.q))
+        self.bg = (self.bg[0] + dbg[0], self.bg[1] + dbg[1], self.bg[2] + dbg[2])
+        Bt = m3T(B)
+        # P <- P - K [B' C]:  A -= KA B',  B -= KA C,  C -= KC C
+        self.A = m3sym(m3add(A, m3mul(KA, Bt), -1.0))
+        self.B = m3add(B, m3mul(KA, C), -1.0)
+        self.C = m3sym(m3add(C, m3mul(KC, C), -1.0))
+
     def gravity(self, f, sig):
         """f: mean body specific force. Measurement z = (R f / |f|)_xy  ~ (-dth_y, dth_x)."""
         n = math.sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2])
@@ -621,7 +685,7 @@ def initial_attitude(gsum, asum, cnt, nb, sg):
     """Gravity direction (roll, pitch; yaw = 0) and gyro bias from the calmest early second."""
     bdt = P["bin_dt"]
     per = max(1, int(round(1.0 / bdt)))
-    lim = min(nb, int(15.0 / bdt))
+    lim = min(nb, int(60.0 / bdt))
     best, bestv = 0, 1e30
     for s in range(0, max(1, lim - per + 1), max(1, per // 4)):
         n = 0; m = [0.0] * 3; m2 = [0.0] * 3
@@ -715,9 +779,17 @@ def attitude(gsum, asum, cnt, nb, T_L, gmag):
         q = P["bg_rw"] + (P["bg_k"] * sev_at(b * bdt) if adapt else 0.0)
         return q * q * bdt
 
+    def is_still(b):
+        if STILL is None:
+            return False
+        k = int(b * bdt * 2.0)
+        return 0 <= k < len(STILL) and STILL[k] == 1
+
     def tilt_sig(f, b):
         n = math.sqrt(f[0] * f[0] + f[1] * f[1] + f[2] * f[2])
         dev = abs(n - gmag)
+        if is_still(b):
+            return P["still_tilt"]
         if dev > P["tilt_gate"]:
             return None
         s2 = P["tilt_sig"] ** 2 + (P["tilt_k"] * dev) ** 2
@@ -765,6 +837,9 @@ def attitude(gsum, asum, cnt, nb, T_L, gmag):
             if s is not None:
                 F.gravity(f, s)
             acc = [0.0, 0.0, 0.0]; na = 0; since = 0
+        if c and is_still(b):
+            sz = max(P["zaru_sig"], sigma_g(b * bdt) / math.sqrt(c))
+            F.zero_rate(rate(b), sz)
         store(b + 1, F)
     bg_end = F.bg
     if not P["backward"]:
@@ -904,6 +979,13 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
         qbz_[j] = (qb * qb + (P["ba_kz"] * sv) ** 2) * dt
     qc = P["sig_c"] ** 2 * dt
     g0, g1 = h, dt
+    rz = P["zupt_sig"] ** 2
+    zk = array("b", bytes(K))
+    if STILL is not None:
+        for j in range(K):
+            k = int(j * kdt * 2.0)
+            if 0 <= k < len(STILL) and STILL[k] and j * kdt <= T_L:
+                zk[j] = 1
     store = array("d", bytes(8 * 14 * K))  # filtered mean (4) + covariance upper triangle (10)
     for ax in range(3):
         horiz = ax < 2
@@ -939,8 +1021,8 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
                 c00 = n00 + g0 * g0 * qa; c01 = n01 + g0 * g1 * qa; c02 = n02; c03 = n03
                 c11 = n11 + g1 * g1 * qa; c12 = n12; c13 = n13
                 c22 = c22 + qb_[i]; c33 = c33 + qc
-            # pseudo-measurement v = 0 (variance rv)
-            S = c11 + rv
+            # pseudo-measurement v = 0 (variance rv; much tighter at rest = zero-velocity update)
+            S = c11 + (rz if zk[j] else rv)
             k0, k1, k2, k3 = c01 / S, c11 / S, c12 / S, c13 / S
             inn = -x1
             x0 += k0 * inn; x1 += k1 * inn; x2 += k2 * inn; x3 += k3 * inn
@@ -1105,6 +1187,7 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L):
 INFO = {}
 INIT = None
 JAM = dict(L=0.0, gamma=1.7, T=1.0, sg=None, sa=None)
+STILL = None  # per 0.5 s window: 1 if the body is at rest
 
 
 def sev_at(t):
@@ -1127,7 +1210,7 @@ def sigma_a(t):
 
 def run(inp, out_path, hook=None):
     """hook (development only): optional callable(stage, data) -> data, used by offline oracles."""
-    global INFO, INIT
+    global INFO, INIT, STILL
     opener, src = resolve_input(inp)
     info = survey(opener)
     INFO = info
@@ -1137,9 +1220,11 @@ def run(inp, out_path, hook=None):
     T_end = max(info["t_end"], T_L)
     L, gam = fit_severity(present, info["dt_nom"], T_L, T_end)
     JAM.update(L=L, gamma=gam, T=max(T_end, 1e-9), sg=smooth_levels(sg, T_L), sa=smooth_levels(sa, T_L))
-    gsum, asum, cnt, nb, st = preintegrate(opener, info, JAM["sg"], JAM["sa"], T_L)
+    gsum, asum, cnt, nb, st, ws, nwin = preintegrate(opener, info, JAM["sg"], JAM["sa"], T_L)
     INIT = initial_attitude(gsum, asum, cnt, nb, sg)
     gmag = INIT[2]
+    STILL = still_windows(ws, nwin, gmag) if P["still"] else None
+    del ws
     qs, bg_end = attitude(gsum, asum, cnt, nb, T_L, gmag)
     if hook:
         qs = hook("attitude", dict(qs=qs, nb=nb, info=info))
@@ -1147,7 +1232,7 @@ def run(inp, out_path, hook=None):
     n_out = write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L)
     log(f"src={src} rows={info['rows']} out={n_out} dt={info['dt_nom']:.5f} gyro_first={info['gyro_first']} "
         f"ascale={info['ascale']:.3f} T_L={T_L:.2f}s bins={nb} knots={K}")
-    log(f"integrity {st}")
+    log(f"integrity {st}  still windows: {sum(STILL) if STILL is not None else 0} x 0.5 s")
     log(f"jamming L={L:.3f} gamma={gam:.3f} | white noise gyro {JAM['sg'][2]:.4f}->{JAM['sg'][max(0, int(T_L) - 1)]:.4f} rad/s, "
         f"accel {JAM['sa'][2]:.4f}->{JAM['sa'][max(0, int(T_L) - 1)]:.4f} m/s^2")
     log(f"init g={gmag:.4f} calm@{INIT[3]*P['bin_dt']:.2f}s var={INIT[4]:.2e} bg0={INIT[1]} bg_end={bg_end} gz={gz:.4f}")
