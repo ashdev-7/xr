@@ -84,7 +84,42 @@ imu0/data.csv
 ## Results
 
 <!-- RESULTS:BEGIN -->
-RESULTS PENDING FINAL RUN.
+**Rotorcraft (EuRoC MAV), TEST flights MH_02_easy, MH_04_difficult, V1_02_medium, V1_03_difficult, V2_01_easy, V2_03_difficult; 2 scenarios x 3 seeds**
+
+| method | ATE [m] | pre-failure [m] | blind 5 s [m] | dropout [m] | RPE 1 s [m] | RPE 1 s [deg] |
+|---|---|---|---|---|---|---|
+| PathGuard | 2.374 | 2.363 | 2.209 | 2.335 | 0.354 | 0.884 |
+| stand-still | 3.197 | 3.206 | 2.885 | 3.284 | 0.760 | 20.395 |
+| naive integration | 18645 | 17227 | 41282 | 19877 | 636 | 20.395 |
+| legacy C++ v1 | 3.167 | 3.175 | 2.882 | 3.254 | 0.726 | 1.013 |
+
+**Handheld (TUM-VI room), TEST flights TUMVI_room2, TUMVI_room4, TUMVI_room6; 2 scenarios x 3 seeds**
+
+| method | ATE [m] | pre-failure [m] | blind 5 s [m] | dropout [m] | RPE 1 s [m] | RPE 1 s [deg] |
+|---|---|---|---|---|---|---|
+| PathGuard | 0.532 | 0.527 | 0.611 | 0.605 | 0.214 | 2.623 |
+| stand-still | 1.096 | 1.112 | 0.621 | 1.034 | 0.729 | 44.998 |
+| naive integration | 644 | 595 | 1343 | 734 | 19.543 | 44.998 |
+| legacy C++ v1 | 0.987 | 0.999 | 0.621 | 0.948 | 0.606 | 1.966 |
+
+**Ablations (TEST): ATE / blind 5 s [m]**
+
+| configuration | rotorcraft | handheld |
+|---|---|---|
+| full | 2.374 / 2.209 | 0.532 / 0.611 |
+| no rotor-drag velocity | 2.965 / 2.895 | 0.532 / 0.611 |
+| no rest detection (ZUPT/ZARU) | 2.413 / 2.257 | 0.532 / 0.611 |
+| no spike repair | 2.374 / 2.209 | 0.518 / 0.600 |
+| no jamming adaptation | 2.388 / 2.473 | 0.509 / 0.676 |
+| no attitude smoother (filter only) | 2.379 / 2.211 | 0.536 / 0.591 |
+| blind: smoother forecast (no hold) | 2.371 / 2.415 | 0.532 / 0.611 |
+
+**Resources (single thread, CPython 3.13.7)**
+
+| flight | length | ms per 1 s of IMU (budget 20) | heap: estimator data [MB] | heap: incl. interpreter compile of main.py [MB] |
+|---|---|---|---|---|
+| MH_02_easy | 152 s (29480 rows) | 6.86 | 1.85 | 7.82 |
+| TUMVI_room2 | 144 s (27879 rows) | 6.19 | 1.73 | 7.82 |
 <!-- RESULTS:END -->
 
 ## Limitations

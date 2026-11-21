@@ -211,3 +211,14 @@ Literature suggestion for correlated measurement errors: one update per window o
 TRAIN rotor flights x 2 scen, seed 42: every knot 2.464 (BLIND 1.746); every 10 knots, variance x1 3.252,
 x0.3 2.908, x0.1 2.482 (1.741, equivalent to per-knot); every 20, x0.2 3.025. Fourth independent experiment
 (after GM state, drag-bias RW, tighter drag_sig) showing that the slow content of the drag velocity is signal.
+
+## 2026-11-21 — FINAL held-out results (tools/bench/report.py, TEST flights, 2 scen x 3 seeds)
+Rotorcraft (MH_02, MH_04, V1_02, V1_03, V2_01, V2_03): ATE 2.374 (stand-still 3.197, legacy C++ 3.167,
+naive 18645); BLIND 2.209 (2.885); RPE 1 s 0.354 m / 0.884 deg.
+Handheld (TUM room2/4/6): ATE 0.532 (stand-still 1.096, legacy C++ 0.987, naive 644); BLIND 0.611 (0.621).
+Ablations (rotor / handheld ATE): no drag 2.965 / -, no rest 2.413 / -, no spike repair 2.374 / 0.518,
+no jamming adaptation 2.388 / 0.509 (BLIND 2.473 / 0.676), filter only 2.379 / 0.536, rotor blind smoother
+forecast 2.371 (BLIND 2.415). Resources: 6.86 / 6.19 ms per s; estimator heap 1.85 / 1.73 MB; 7.82 MB incl. compile.
+Follow-up on TRAIN handheld (room1/3/5, 2 scen x 3 seeds): repair=0 J 0.5523 -> 0.5495 (-0.5 %), adapt=0 0.6161.
+Decision: keep spike repair (tiny cost on this script's handheld spikes, protection against stronger jamming);
+keep adaptation (clearly better on TRAIN; the TEST ATE dip is within noise and its BLIND is worse).
