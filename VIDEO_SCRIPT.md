@@ -23,8 +23,8 @@ python tests/test_contract.py
 ```
 > "One standard-library Python file, nothing to install. The log shows what it found: the platform
 > (a rotorcraft, from its rotor vibration), the jamming level read from packet loss, frozen and
-> duplicated rows, repaired spikes and rest periods. It runs in about 6.9 ms per second of IMU
-> with a 1.9 MB heap. One pose per input row, always, as checked by 18 malformed-input tests."
+> duplicated rows, repaired spikes and rest periods. It runs in about 6 ms per second of IMU
+> with a 1.6 MB heap. One pose per input row, always, as checked by 18 malformed-input tests."
 
 **1:20–1:55 · How it works** (slide 4)
 > "First, one streaming pass cleans the data and measures the jamming. Then an error-state Kalman
@@ -35,8 +35,8 @@ python tests/test_contract.py
 
 **1:55–2:35 · Results** (slide 5, then slide 8)
 > "We validated on real EuRoC and TUM-VI IMU data, degraded with the organizers' own script and
-> evaluated on flights we never tuned on. On drone flights PathGuard reaches 2.37 metres ATE,
-> against 3.20 for standing still and 18,645 for naive integration; on handheld data 0.53 against 1.10. Every component is
+> evaluated on flights held out while we built and tuned it. On drone flights PathGuard reaches 2.37 metres ATE,
+> against 3.20 for standing still and 18,645 for naive integration; on handheld data 0.52 against 1.10. With three 2-second signal losses added, the dropout error stays below standing still. Every component is
 > backed by an ablation, and ideas that did not help were removed and logged."
 
 **2:35–2:50 · Close** (slide 6)
