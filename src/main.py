@@ -13,7 +13,7 @@ Pure Python standard library: no numpy, no compiled code. Memory grows with the 
 50 Hz bins and 10 Hz knots, never with the number of rows, and the file is streamed three times:
 
   Pass A  survey      format/columns/units, timestamps, failure point, per-second noise ("jamming meter")
-  Pass B  integrity   reject frozen/duplicate/zero/NaN rows and spikes; preintegrate valid rows into bins
+  Pass 1  ingest      one streaming pass: integrity checks, jamming meter, preintegration into bins
   Stage C attitude    error-state Kalman filter on bins, forward + backward, two-filter fusion
   Stage D position    per-axis Kalman filter + RTS smoother on 10 Hz knots with a motion prior;
                       the 5 s blind window is the same smoother with no data (prior-conditional forecast)
@@ -72,8 +72,6 @@ def log(*a):
 # ----------------------------------------------------------------------------- input handling
 def resolve_input(arg):
     """Accept a CSV, a dataset folder, or a zip; returns an opener for a fresh text stream."""
-    import io
-    import zipfile
     cands = ("imu0/data.csv", "mav0/imu0/data.csv", "data.csv")
     if arg is None:
         arg = "."
@@ -91,7 +89,9 @@ def resolve_input(arg):
             arg = os.path.join(arg, zips[0])
         else:
             raise SystemExit(f"no imu0/data.csv found under {arg}")
-    if arg.lower().endswith(".zip") and zipfile.is_zipfile(arg):
+    if arg.lower().endswith(".zip"):
+        import io
+        import zipfile  # imported only for zip input (the module alone costs ~1 MB of heap)
         z = zipfile.ZipFile(arg)
         names = [n for n in z.namelist() if n.endswith("imu0/data.csv")] or \
                 [n for n in z.namelist() if n.endswith(".csv")]
@@ -110,25 +110,20 @@ def parse_ts(tok):
         return None, float(tok)
 
 
-# ----------------------------------------------------------------------------- pass A: survey
-def survey(opener):
-    """Detect layout and units, count rows, locate failure, measure per-second noise."""
+# ----------------------------------------------------------------------------- pass 1a: format survey
+def survey(opener, nmax=4000):
+    """Pre-read up to nmax data rows: header, column order, units, nominal sample period."""
     header = None
     rows = 0
-    first_ts = None
-    first_tsf = None
+    first_ts = first_tsf = prev = None
     is_int = True
-    dts = []
-    prev = None
-    last_ti, last_tf = None, None
-    norms13, norms46 = [], []
+    dts, n13, n46 = [], [], []
     with opener() as f:
         for line in f:
             s = line.strip()
             if not s:
                 continue
-            c = s[0]
-            if not (c.isdigit() or c in "+-."):
+            if not (s[0].isdigit() or s[0] in "+-."):
                 if header is None and rows == 0:
                     header = s
                 continue
@@ -142,150 +137,170 @@ def survey(opener):
                 is_int = False
             if rows == 1:
                 first_ts, first_tsf = ti, tf
-            last_ti, last_tf = ti, tf
             cur = ti if ti is not None else tf
-            if prev is not None and rows <= 2001:
-                d = cur - prev
-                if d > 0:
-                    dts.append(d)
+            if prev is not None and cur > prev:
+                dts.append(cur - prev)
             prev = cur
-            if rows <= 4001 and len(parts) >= 7:
+            if len(parts) >= 7:
                 try:
                     v = [float(x) for x in parts[1:7]]
                 except ValueError:
-                    continue
-                if all(math.isfinite(x) for x in v) and any(v):
-                    norms13.append(math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]))
-                    norms46.append(math.sqrt(v[3] * v[3] + v[4] * v[4] + v[5] * v[5]))
+                    v = None
+                if v and all(math.isfinite(x) for x in v) and any(v):
+                    n13.append(math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]))
+                    n46.append(math.sqrt(v[3] * v[3] + v[4] * v[4] + v[5] * v[5]))
+            if rows >= nmax:
+                break
     if rows < 3:
         raise SystemExit("input has fewer than 3 IMU rows")
-    # --- timestamp unit -> seconds scale (same rule as the official degradation script)
+    # timestamp unit -> seconds (same rule as the official degradation script)
     dts.sort()
     md = dts[len(dts) // 2] if dts else 1
-    if md < 1.0:
-        tscale = 1.0
-    elif md < 1e3:
-        tscale = 1e-3
-    elif md < 1e6:
-        tscale = 1e-6
-    else:
-        tscale = 1e-9
+    tscale = 1.0 if md < 1.0 else 1e-3 if md < 1e3 else 1e-6 if md < 1e6 else 1e-9
     dt_nom = md * tscale if dts else 0.005
-    # --- column layout: header names first, magnitudes as fallback
+    # column layout: header names first, gravity magnitude as fallback
     gyro_first = True
     if header:
         h = [x.strip().lower() for x in header.lstrip("#").split(",")]
-        if len(h) >= 7:
-            def kind(name):
-                if name.startswith("w") or "gyr" in name or "omega" in name or "rad" in name:
-                    return "g"
-                if name.startswith("a") or "acc" in name or "m s^-2" in name or "m/s" in name:
-                    return "a"
-                return "?"
-            k1, k4 = kind(h[1]), kind(h[4])
-            if k1 == "a" and k4 == "g":
-                gyro_first = False
-            elif k1 == "?" or k4 == "?":
-                header = None  # unknown names: fall back to magnitudes
+        kind = lambda n: ("g" if n.startswith("w") or "gyr" in n or "rad" in n else
+                          "a" if n.startswith("a") or "acc" in n or "m s^-2" in n or "m/s" in n else "?")
+        if len(h) < 7 or "?" in (kind(h[1]), kind(h[4])):
+            header = None
+        elif kind(h[1]) == "a" and kind(h[4]) == "g":
+            gyro_first = False
     med = lambda x: sorted(x)[len(x) // 2] if x else 0.0
-    m13, m46 = med(norms13), med(norms46)
-    if not header and norms13:
-        # accelerometer triple carries gravity (|f| ~ 9.8 m/s^2 or ~1 g)
-        def gscore(m):
-            return min(abs(m - 9.80665), abs(m - 1.0) * 9.80665)
-        gyro_first = gscore(m46) <= gscore(m13)
-    ma = m46 if gyro_first else m13
-    ascale = 9.80665 if 0.5 < ma < 2.0 else 1.0  # accel given in g
-    if last_ti is not None and first_ts is not None:
-        t_end = (last_ti - first_ts) * tscale
-    else:
-        t_end = ((last_ti if last_ti is not None else last_tf) - (first_ts if first_ts is not None else first_tsf)) * tscale
-    return dict(rows=rows, header=header, tscale=tscale, dt_nom=dt_nom, gyro_first=gyro_first,
-                ascale=ascale, is_int=is_int, first_ts=first_ts, first_tsf=first_tsf, t_end=t_end)
+    if not header and n13:  # the accelerometer triple carries gravity (~9.8 m/s^2 or ~1 g)
+        gs = lambda m: min(abs(m - 9.80665), abs(m - 1.0) * 9.80665)
+        gyro_first = gs(med(n46)) <= gs(med(n13))
+    ma = med(n46) if gyro_first else med(n13)
+    return dict(header=header, tscale=tscale, dt_nom=dt_nom, gyro_first=gyro_first,
+                ascale=9.80665 if 0.5 < ma < 2.0 else 1.0, is_int=is_int, first_ts=first_ts, first_tsf=first_tsf)
 
 
-def row_reader(opener, info):
-    """Yields (t [s from first row], gx, gy, gz, ax, ay, az, valid_numeric) for every data row."""
-    t0i, t0f, ts = info["first_ts"], info["first_tsf"], info["tscale"]
-    gf, asc = info["gyro_first"], info["ascale"]
+# ----------------------------------------------------------------------------- pass 1b: one-pass ingest
+def ingest(opener, info):
+    """Single streaming pass over all rows:
+      * integrity: NaN/short rows, dead (all-zero) rows, frozen/duplicate rows (exact repeats), spikes
+      * jamming meter: per-second robust white-noise level of gyro and accel (MAD of second
+        differences) and unique timestamps present (-> packet loss)
+      * preintegration of valid rows into bins (sum of gyro and accel, count)
+      * 0.5 s window moments for rest detection
+    Spike rule (signature of the jamming model): the SAME sample jumps on all six channels at once by
+    more than spike_k robust sigmas from the median of its two neighbours on each side (measured on
+    labelled official degradations: precision 0.97, recall 0.85; a per-channel rule: precision 0.16)."""
+    t0i, t0f, tsc = info["first_ts"], info["first_tsf"], info["tscale"]
+    gf, asc, dt_nom = info["gyro_first"], info["ascale"], info["dt_nom"]
+    bdt = P["bin_dt"]
+    kk, repair = P["spike_k"], P["repair"]
     isfin = math.isfinite
+    gsum, asum, cnt = array("d"), array("d"), array("H")   # per bin
+    ws = array("d")                                          # per 0.5 s window: n, sum w, sum w^2, sum f, sum f^2
+    sg, sa, present = array("f"), array("f"), array("H")    # per second
+    bg, ba = [], []
+    w_idx = npres = 0
+    last_t = last = p1 = p2 = None
+    t_last_valid = t = 0.0
+    st = dict(rows=0, nan=0, dead=0, frozen=0, spikes=0, valid=0)
+    buf = []
+    sig_g, sig_a = 0.01, 0.1
+
+    def emit(r):
+        tt = r[0]
+        b = int(tt / bdt)
+        while len(cnt) <= b:
+            gsum.extend((0.0, 0.0, 0.0)); asum.extend((0.0, 0.0, 0.0)); cnt.append(0)
+        i3 = 3 * b
+        gsum[i3] += r[1]; gsum[i3 + 1] += r[2]; gsum[i3 + 2] += r[3]
+        asum[i3] += r[4]; asum[i3 + 1] += r[5]; asum[i3 + 2] += r[6]
+        if cnt[b] < 65535:
+            cnt[b] += 1
+        k = int(tt * 2.0)
+        while len(ws) <= 13 * k:
+            ws.extend((0.0,) * 13)
+        o = 13 * k
+        ws[o] += 1.0
+        for c in range(3):
+            x, y = r[1 + c], r[4 + c]
+            ws[o + 1 + c] += x; ws[o + 4 + c] += x * x; ws[o + 7 + c] += y; ws[o + 10 + c] += y * y
+        st["valid"] += 1
+
+    def spike(i):
+        r = buf[i]
+        o = [buf[j] for j in range(5) if j != i]
+        for c in range(1, 7):
+            v = sorted((o[0][c], o[1][c], o[2][c], o[3][c]))
+            if abs(r[c] - 0.5 * (v[1] + v[2])) <= kk * (sig_g if c <= 3 else sig_a):
+                return False
+        return True
+
     with opener() as f:
         for line in f:
             s = line.strip()
-            if not s:
-                continue
-            c = s[0]
-            if not (c.isdigit() or c in "+-."):
+            if not s or not (s[0].isdigit() or s[0] in "+-."):
                 continue
             parts = s.replace(" ", "").replace("\t", "").split(",")
             try:
                 ti, tf = parse_ts(parts[0])
             except ValueError:
                 continue
-            if ti is not None and t0i is not None:
-                t = (ti - t0i) * ts
-            else:
-                t = ((ti if ti is not None else tf) - (t0i if t0i is not None else t0f)) * ts
-            ok = len(parts) >= 7
-            if ok:
-                try:
-                    v = [float(x) for x in parts[1:7]]
-                except ValueError:
-                    ok = False
-            if ok:
-                ok = isfin(v[0]) and isfin(v[1]) and isfin(v[2]) and isfin(v[3]) and isfin(v[4]) and isfin(v[5])
-            if not ok:
-                yield t, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, False
+            st["rows"] += 1
+            t = (ti - t0i) * tsc if (ti is not None and t0i is not None) else \
+                ((ti if ti is not None else tf) - (t0i if t0i is not None else t0f)) * tsc
+            while t >= w_idx + 1.0:  # close the per-second window
+                sg.append(_mad_sigma(bg)); sa.append(_mad_sigma(ba)); present.append(min(npres, 65535))
+                if sg[-1] > 0:
+                    sig_g = sg[-1]
+                if sa[-1] > 0:
+                    sig_a = sa[-1]
+                bg, ba = [], []; npres = 0; w_idx += 1
+            if t != last_t:
+                npres += 1
+                last_t = t
+            try:
+                v = (float(parts[1]), float(parts[2]), float(parts[3]), float(parts[4]), float(parts[5]), float(parts[6]))
+            except (ValueError, IndexError):
+                st["nan"] += 1
                 continue
-            if gf:
-                yield t, v[0], v[1], v[2], v[3] * asc, v[4] * asc, v[5] * asc, True
-            else:
-                yield t, v[3], v[4], v[5], v[0] * asc, v[1] * asc, v[2] * asc, True
-
-
-# ----------------------------------------------------------------------------- jamming meter
-def noise_meter(opener, info):
-    """Per-second statistics in one streaming pass:
-      * robust white-noise level of gyro and accel (MAD of second differences of valid rows)
-      * unique timestamps present (-> missing rows = packet loss)
-    and the time of the last valid row (IMU failure)."""
-    dt_nom = info["dt_nom"]
-    sg, sa = array("f"), array("f")
-    present = array("H")
-    bg, ba = [], []
-    w_idx = 0
-    npres = 0
-    p1 = p2 = None  # previous two valid rows (t, 6 values)
-    t_last_valid = 0.0
-    last = None
-    last_t = None
-    n_valid = 0
-    for r in row_reader(opener, info):
-        t = r[0]
-        while t >= w_idx + 1.0:
-            sg.append(_mad_sigma(bg)); sa.append(_mad_sigma(ba)); present.append(min(npres, 65535))
-            bg, ba = [], []; npres = 0; w_idx += 1
-        if t != last_t:
-            npres += 1
-            last_t = t
-        if not r[7]:
-            continue
-        vals = r[1:7]
-        if not any(vals) or vals == last:  # dead (all zero) or frozen/duplicate row
-            last = vals
-            continue
-        last = vals
-        n_valid += 1
-        t_last_valid = t
-        if p1 is not None and p2 is not None:
-            d1, d2 = t - p1[0], p1[0] - p2[0]
-            if 0.5 * dt_nom < d1 < 1.5 * dt_nom and 0.5 * dt_nom < d2 < 1.5 * dt_nom:
-                a, b, c = vals, p1[1], p2[1]
-                bg.append(abs(a[0] - 2 * b[0] + c[0])); bg.append(abs(a[1] - 2 * b[1] + c[1])); bg.append(abs(a[2] - 2 * b[2] + c[2]))
-                ba.append(abs(a[3] - 2 * b[3] + c[3])); ba.append(abs(a[4] - 2 * b[4] + c[4])); ba.append(abs(a[5] - 2 * b[5] + c[5]))
-        p2, p1 = p1, (t, vals)
+            if not (isfin(v[0]) and isfin(v[1]) and isfin(v[2]) and isfin(v[3]) and isfin(v[4]) and isfin(v[5])):
+                st["nan"] += 1
+                continue
+            if not (v[0] or v[1] or v[2] or v[3] or v[4] or v[5]):
+                st["dead"] += 1
+                last = v
+                continue
+            if v == last:
+                st["frozen"] += 1
+                continue
+            last = v
+            r = (t, v[0], v[1], v[2], v[3] * asc, v[4] * asc, v[5] * asc) if gf else \
+                (t, v[3], v[4], v[5], v[0] * asc, v[1] * asc, v[2] * asc)
+            t_last_valid = t
+            if p1 is not None and p2 is not None:  # second differences for the noise meter
+                d1, d2 = t - p1[0], p1[0] - p2[0]
+                if 0.5 * dt_nom < d1 < 1.5 * dt_nom and 0.5 * dt_nom < d2 < 1.5 * dt_nom:
+                    for c in (1, 2, 3):
+                        bg.append(abs(r[c] - 2 * p1[c] + p2[c]))
+                    for c in (4, 5, 6):
+                        ba.append(abs(r[c] - 2 * p1[c] + p2[c]))
+            p2, p1 = p1, r
+            if not repair:
+                emit(r)
+                continue
+            buf.append(r)
+            if len(buf) == 5:
+                if spike(2):
+                    st["spikes"] += 1
+                    del buf[2]
+                else:
+                    emit(buf.pop(0))
+    for r in buf:  # the last rows before the failure have no two-sided window
+        emit(r)
     sg.append(_mad_sigma(bg)); sa.append(_mad_sigma(ba)); present.append(min(npres, 65535))
-    return sg, sa, present, t_last_valid, n_valid
+    nb = int(t_last_valid / bdt) + 1
+    while len(cnt) < nb:
+        gsum.extend((0.0, 0.0, 0.0)); asum.extend((0.0, 0.0, 0.0)); cnt.append(0)
+    return dict(sg=sg, sa=sa, present=present, T_L=t_last_valid, t_end=t, gsum=gsum, asum=asum, cnt=cnt,
+                nb=nb, ws=ws, nwin=len(ws) // 13, stats=st)
 
 
 def _mad_sigma(x):
@@ -358,93 +373,6 @@ def fit_severity(present, dt_nom, T_L, T_end):
         if e < best[0]:
             best = (e, Lh, g)
     return best[1], best[2]
-
-
-# ----------------------------------------------------------------------------- pass B: integrity + bins
-def preintegrate(opener, info, sg, sa, T_L):
-    """Valid-row stream -> spike rejection (5-row window) -> per-bin mean gyro and accel."""
-    bdt = P["bin_dt"]
-    nb = int(T_L / bdt) + 1
-    gsum = array("d", bytes(8 * 3 * nb))
-    asum = array("d", bytes(8 * 3 * nb))
-    cnt = array("H", bytes(2 * nb))
-    nw = len(sg)
-    kk = P["spike_k"]
-    repair = P["repair"]
-    buf = []  # last 5 valid rows
-    last = None
-    stats = dict(dead=0, frozen=0, spikes=0, valid=0, nan=0)
-    nwin = int(T_L / 0.5) + 1
-    ws = array("d", bytes(8 * 13 * nwin))  # per 0.5 s window: n, sum w(3), sum w^2(3), sum f(3), sum f^2(3)
-
-    def emit(r):
-        t = r[0]
-        if t > T_L + 1e-9:
-            return
-        b = int(t / bdt)
-        if b >= nb:
-            b = nb - 1
-        o = 13 * min(nwin - 1, int(t * 2.0))
-        ws[o] += 1.0
-        ws[o + 1] += r[1]; ws[o + 2] += r[2]; ws[o + 3] += r[3]
-        ws[o + 4] += r[1] * r[1]; ws[o + 5] += r[2] * r[2]; ws[o + 6] += r[3] * r[3]
-        ws[o + 7] += r[4]; ws[o + 8] += r[5]; ws[o + 9] += r[6]
-        ws[o + 10] += r[4] * r[4]; ws[o + 11] += r[5] * r[5]; ws[o + 12] += r[6] * r[6]
-        i3 = 3 * b
-        gsum[i3] += r[1]; gsum[i3 + 1] += r[2]; gsum[i3 + 2] += r[3]
-        asum[i3] += r[4]; asum[i3 + 1] += r[5]; asum[i3 + 2] += r[6]
-        if cnt[b] < 65535:
-            cnt[b] += 1
-        stats["valid"] += 1
-
-    def check(i):
-        """Spike signature of the jamming model: the SAME sample jumps on all six channels
-        (every gyro and accel axis) at once. Real motion, even fast handheld rotation, does not.
-        A channel 'jumps' if it is more than spike_k robust sigmas from the median of its
-        two neighbours on each side. Measured on labelled official degradations:
-        precision 0.97, recall 0.85 (a per-channel rule gives precision 0.16)."""
-        r = buf[i]
-        w = min(nw - 1, int(r[0]))
-        s_g = kk * (sg[w] if sg[w] > 0 else 0.01)
-        s_a = kk * (sa[w] if sa[w] > 0 else 0.1)
-        o = [buf[j] for j in range(5) if j != i]
-        for c in range(1, 7):
-            v = sorted((o[0][c], o[1][c], o[2][c], o[3][c]))
-            if abs(r[c] - 0.5 * (v[1] + v[2])) <= (s_g if c <= 3 else s_a):
-                return False
-        return True
-
-    for r in row_reader(opener, info):
-        if not r[7]:
-            stats["nan"] += 1
-            continue
-        vals = r[1:7]
-        if not any(vals):
-            stats["dead"] += 1
-            last = vals
-            continue
-        if vals == last:
-            stats["frozen"] += 1
-            continue
-        last = vals
-        if r[0] > T_L + 1e-9:
-            continue
-        if not repair:
-            emit(r)
-            continue
-        buf.append(r)
-        if len(buf) == 5:
-            if check(2):
-                stats["spikes"] += 1
-                del buf[2]
-                continue
-            if len(buf) == 5:
-                emit(buf.pop(0))
-                # buf now holds 4; the next row completes the window around buf[2]
-    # flush: the last <=4 rows before the failure have no two-sided window; keep them
-    for r in buf:
-        emit(r)
-    return gsum, asum, cnt, nb, stats, ws, nwin
 
 
 def still_windows(ws, nwin, gmag):
@@ -1239,13 +1167,15 @@ def run(inp, out_path, hook=None):
     opener, src = resolve_input(inp)
     info = survey(opener)
     INFO = info
-    sg, sa, present, T_L, n_valid = noise_meter(opener, info)
-    if n_valid < 10:
+    d = ingest(opener, info)
+    T_L, T_end, st = d["T_L"], max(d["t_end"], d["T_L"]), d["stats"]
+    if st["valid"] < 10:
         raise SystemExit("fewer than 10 valid IMU rows")
-    T_end = max(info["t_end"], T_L)
-    L, gam = fit_severity(present, info["dt_nom"], T_L, T_end)
-    JAM.update(L=L, gamma=gam, T=max(T_end, 1e-9), sg=smooth_levels(sg, T_L), sa=smooth_levels(sa, T_L))
-    gsum, asum, cnt, nb, st, ws, nwin = preintegrate(opener, info, JAM["sg"], JAM["sa"], T_L)
+    sg = d["sg"]
+    L, gam = fit_severity(d["present"], info["dt_nom"], T_L, T_end)
+    JAM.update(L=L, gamma=gam, T=max(T_end, 1e-9), sg=smooth_levels(sg, T_L), sa=smooth_levels(d["sa"], T_L))
+    gsum, asum, cnt, nb, ws, nwin = d["gsum"], d["asum"], d["cnt"], d["nb"], d["ws"], d["nwin"]
+    del d
     INIT = initial_attitude(gsum, asum, cnt, nb, sg)
     gmag = INIT[2]
     STILL = still_windows(ws, nwin, gmag) if P["still"] else None
@@ -1255,7 +1185,7 @@ def run(inp, out_path, hook=None):
         qs = hook("attitude", dict(qs=qs, nb=nb, info=info))
     pos, vel, K, kdt, gz = translation(asum, cnt, nb, qs, T_L, T_end)
     n_out = write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L)
-    log(f"src={src} rows={info['rows']} out={n_out} dt={info['dt_nom']:.5f} gyro_first={info['gyro_first']} "
+    log(f"src={src} rows={st['rows']} out={n_out} dt={info['dt_nom']:.5f} gyro_first={info['gyro_first']} "
         f"ascale={info['ascale']:.3f} T_L={T_L:.2f}s bins={nb} knots={K}")
     log(f"integrity {st}  still windows: {sum(STILL) if STILL is not None else 0} x 0.5 s")
     log(f"jamming L={L:.3f} gamma={gam:.3f} | white noise gyro {JAM['sg'][2]:.4f}->{JAM['sg'][max(0, int(T_L) - 1)]:.4f} rad/s, "
