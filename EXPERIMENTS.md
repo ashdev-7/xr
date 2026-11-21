@@ -205,3 +205,9 @@ TRAIN MH_01/03/05 + V1_01 + V2_02 (2 scen x seeds 42, 1): J_train 0.7033 -> 0.65
 Held-out MH_02, MH_04, V1_02, V1_03, V2_01 (2 scen x 3 seeds): J 0.8105 -> 0.8093, ATE 2.485 -> 2.466,
 BLIND 2.036 -> 1.944. Per flight: MH_02 3.94 -> 4.02, MH_04 3.73 -> 3.51, V1_02 1.34 -> 1.43,
 V1_03 1.30 -> 1.23, V2_01 2.12 -> 2.14.
+
+## 2026-11-21 — decimated drag updates (rejected; code reverted)
+Literature suggestion for correlated measurement errors: one update per window on the window mean.
+TRAIN rotor flights x 2 scen, seed 42: every knot 2.464 (BLIND 1.746); every 10 knots, variance x1 3.252,
+x0.3 2.908, x0.1 2.482 (1.741, equivalent to per-knot); every 20, x0.2 3.025. Fourth independent experiment
+(after GM state, drag-bias RW, tighter drag_sig) showing that the slow content of the drag velocity is signal.
