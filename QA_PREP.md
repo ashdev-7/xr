@@ -16,7 +16,7 @@ IMU-only navigation cannot see slow motion: a 0.01 m/s² bias becomes 0.5 m afte
 integration (thousands of metres on the same data). On the machine hall flights, 86 % of the true motion
 is in periods longer than 60 s. On six held-out drone flights we reach 2.37 m ATE vs 3.20 m standing still
 (naive integration: 18,645 m), mainly because the rotor-drag model turns the accelerometer into a velocity sensor.
-On handheld data: 0.53 m vs 1.10 m.
+On handheld data: 0.52 m vs 1.10 m.
 
 **3. What is the rotor-drag model and why is it allowed?**
 A multirotor's thrust acts along one body axis, so the specific force perpendicular to it is mostly rotor
@@ -42,8 +42,9 @@ velocity. For handheld data the smoother's own prior-conditional forecast is use
 **7. What if the organizers' degradation differs from the script?**
 Most of the system measures rather than assumes: noise levels per second, severity from packet loss,
 rest from data, platform from vibration. We tested both ways the script can be applied to EuRoC files
-(columns as-is, and reordered) and three seeds. If the degradation were very different (for example long
-dropouts), the smoother still bridges gaps from both sides; we did not tune for that.
+(columns as-is, and reordered) and three seeds. The deck mentions 2-second signal loss, which the script never
+produces (its bursts are ~0.25 s), so we added three 2 s gaps per flight: on held-out flights the dropout error is
+1.97 m (2.71 m before we made attitude uncertainty grow with gap length; stand-still 2.53 m).
 
 **8. How did you validate without the organizers' ground truth?**
 We downloaded the real public IMU and ground truth (EuRoC, TUM-VI), degraded them with the unmodified
@@ -65,12 +66,13 @@ scenario-specific bias models, a return-to-launch prior).
 **11. What fails first under worse jamming?**
 The slow error components: accelerometer bias and scale drift late in the flight make the end of the
 trajectory, and therefore the blind window, the weakest part. Spikes, frozen samples, duplicates and
-short dropouts are handled; very long dropouts would rely entirely on the motion prior.
+dropouts up to 2 s are handled and tested; inside a gap the position relies on the motion prior and the data on
+both sides of it.
 
 **12. Why pure Python without numpy?**
 The FAQ requires Python, and peak memory is 20 % of the score. Importing numpy alone costs ~7.4 MB of
-traced heap. Our estimator's data structures peak at 1.7–1.9 MB, and runtime is 6.2–6.9 ms per second of IMU
-against a 20 ms budget.
+traced heap. Our estimator's data structures peak at 1.4–1.6 MB, and runtime is about 6 ms per second of IMU
+against a 20 ms budget (cold process, measured by tools/bench/report.py).
 
 **13. Why do you report ~2 MB and not the process memory?**
 The FAQ says memory is measured at the heap level (data structures, buffers, estimation logic), not the
