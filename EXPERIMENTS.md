@@ -154,3 +154,10 @@ Rejected: blind error rises sharply. The white-noise drag measurement remains be
 ## 2026-11-21 — code review fixes (no accuracy change: 22 variants, seed 42, mean ATE 1.765, 0 contract issues)
 Guard for out-of-order / far-future timestamps (would have grown arrays without bound); t_end from
 accepted rows; utf-8-sig for folder inputs; dead code removed.
+
+## 2026-11-21 — return-to-launch prior (rejected on principle + small gain)
+GT: every EuRoC flight ends within 0.01-0.26 m of its start (spread 1.8-6.9 m); TUM-VI rooms 0.5-1.1 m
+(spread ~1 m). Dev-only prototype (constant p0 state, end tied to start with sigma_loop), 6 EuRoC flights
+x 2 scen, seed 42, sig_p_h 10: off 3.345 (BLIND 2.351); sigma 1 m: 3.214 (2.318); 0.3 m: 3.197 (2.383).
+Rejected: a -4.4 % gain does not justify a dataset-behaviour assumption (the task describes an aircraft
+flying to a target) that would fail badly on a non-returning flight. Not in src/main.py.
