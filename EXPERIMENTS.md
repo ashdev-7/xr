@@ -261,3 +261,14 @@ Confirms the high-pass hypothesis: fast motion is reproduced at full size, slow 
 ## 2026-11-22 — Student-t (scale-mixture) workspace prior (rejected; code not kept)
 IRLS on the horizontal p - c residual, w = (nu+2)/(nu+d^2), 3 passes. Drone TRAIN 2 scen x 2 seeds ATE:
 Gaussian 2.488; nu 10: 2.540; nu 3: 2.641; nu 1: 2.827. Releasing large excursions also releases slow drift.
+
+## 2026-11-22 — speed-measurement family (Solin 2018, Cortes 2018, RIDI/RoNIN/AirIO ridge analogue)
+Oracle: true 1 s horizontal speed as a velocity measurement along the pass-1 direction (dev-only patch, sigma
+0.3 m/s), TRAIN aware seed 42, ATE: MH_01 3.460 -> 2.586, MH_03 1.929 -> 1.394, V1_01 1.368 -> 1.122,
+V2_02 1.378 -> 1.147, room1 0.317 -> 0.297, room3 0.510 -> 0.324. Large prize if speed were known.
+Constant speed (Solin-style; drone 0.5, handheld 0.85 m/s from TRAIN GT), sigma 0.3 / 0.6: MH_01 3.20 / 3.30,
+MH_03 3.14 / 2.70, V1_01 1.61 / 1.43, V2_02 1.53 / 1.46, room1 0.69 / 0.44, room3 1.04 / 0.68 -> rejected.
+Learned speed (ridge on 8 heading-independent 1 s features of the degraded IMU, leave-one-flight-out, 4
+degradation variants per flight; criteria fixed before running: r >= 0.6, RMSE <= 35 % / 25 % of mean):
+drone mean r 0.22 (3 of 5 flights worse than a constant), handheld mean r 0.47 (RMSE 41-54 %) -> rejected.
+The literature trains speed models on 30 min - 60 h; 5 drone / 3 handheld flights are not enough.
