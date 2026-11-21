@@ -198,3 +198,10 @@ V1_01 2.162 -> 1.598.
 mu(t) = mu0 (f_thrust / mean)^e (literature: drag ~ rotor speed). 9 EuRoC flights x 2 scen, seed 42:
 e = 0: ATE 2.600 BLIND 1.961; e = 0.5: 2.598 / 1.954; e = 1: 2.595 / 1.948. Kept e = 0 (simplicity).
 Held-out V2_01 (seed 42): ATE aware 2.053 / asis 2.219 vs stand-still 2.295.
+
+## 2026-11-21 — rotorcraft class tuning, round 2 (kept)
+TRAIN MH_01/03/05 + V1_01 + V2_02 (2 scen x seeds 42, 1): J_train 0.7033 -> 0.6535
+(sig_v_h 2 -> 4, sig_a 0.2 -> 0.4, ba_rw 0.02 -> 0.04, ba_k 0.02 -> 0.04, sig_c 0.1 -> 0.05).
+Held-out MH_02, MH_04, V1_02, V1_03, V2_01 (2 scen x 3 seeds): J 0.8105 -> 0.8093, ATE 2.485 -> 2.466,
+BLIND 2.036 -> 1.944. Per flight: MH_02 3.94 -> 4.02, MH_04 3.73 -> 3.51, V1_02 1.34 -> 1.43,
+V1_03 1.30 -> 1.23, V2_01 2.12 -> 2.14.
