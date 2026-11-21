@@ -130,10 +130,10 @@ imu0/data.csv
 
 **Resources (single thread, CPython 3.13, Intel laptop CPU)**
 
-| flight | length | ms per 1 s of IMU (budget 20) | heap: estimator data [MB] | heap: incl. interpreter compile of main.py [MB] |
+| flight | length | ms per 1 s of IMU (budget 20) | heap: estimator data [MB] | heap: worst case, traced from interpreter start incl. parsing the code [MB] |
 |---|---|---|---|---|
-| MH_02_easy | 152 s (29480 rows) | 6.21 | 1.64 | 7.79 |
-| TUMVI_room2 | 144 s (27879 rows) | 5.84 | 1.35 | 7.79 |
+| MH_02_easy | 152 s (29480 rows) | 5.14 | 1.62 | 2.99 |
+| TUMVI_room2 | 144 s (27879 rows) | 4.75 | 1.34 | 2.78 |
 <!-- RESULTS:END -->
 
 ![Error over time](figures/error_over_time.png)
