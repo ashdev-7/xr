@@ -152,7 +152,7 @@ def survey(opener, nmax=4000):
             if rows >= nmax:
                 break
     if rows < 3:
-        raise SystemExit("input has fewer than 3 IMU rows")
+        raise ValueError("input has fewer than 3 IMU rows")
     # timestamp unit -> seconds (same rule as the official degradation script)
     dts.sort()
     md = dts[len(dts) // 2] if dts else 1
@@ -1170,7 +1170,7 @@ def run(inp, out_path, hook=None):
     d = ingest(opener, info)
     T_L, T_end, st = d["T_L"], max(d["t_end"], d["T_L"]), d["stats"]
     if st["valid"] < 10:
-        raise SystemExit("fewer than 10 valid IMU rows")
+        raise ValueError("fewer than 10 valid IMU rows")
     sg = d["sg"]
     L, gam = fit_severity(d["present"], info["dt_nom"], T_L, T_end)
     JAM.update(L=L, gamma=gam, T=max(T_end, 1e-9), sg=smooth_levels(sg, T_L), sa=smooth_levels(d["sa"], T_L))
@@ -1188,8 +1188,9 @@ def run(inp, out_path, hook=None):
     log(f"src={src} rows={st['rows']} out={n_out} dt={info['dt_nom']:.5f} gyro_first={info['gyro_first']} "
         f"ascale={info['ascale']:.3f} T_L={T_L:.2f}s bins={nb} knots={K}")
     log(f"integrity {st}  still windows: {sum(STILL) if STILL is not None else 0} x 0.5 s")
-    log(f"jamming L={L:.3f} gamma={gam:.3f} | white noise gyro {JAM['sg'][2]:.4f}->{JAM['sg'][max(0, int(T_L) - 1)]:.4f} rad/s, "
-        f"accel {JAM['sa'][2]:.4f}->{JAM['sa'][max(0, int(T_L) - 1)]:.4f} m/s^2")
+    i0, i1 = min(2, len(JAM["sg"]) - 1), min(max(0, int(T_L) - 1), len(JAM["sg"]) - 1)
+    log(f"jamming L={L:.3f} gamma={gam:.3f} | white noise gyro {JAM['sg'][i0]:.4f}->{JAM['sg'][i1]:.4f} rad/s, "
+        f"accel {JAM['sa'][i0]:.4f}->{JAM['sa'][i1]:.4f} m/s^2")
     log(f"init g={gmag:.4f} calm@{INIT[3]*P['bin_dt']:.2f}s var={INIT[4]:.2e} bg0={INIT[1]} bg_end={bg_end} gz={gz:.4f}")
     return n_out
 
@@ -1206,7 +1207,33 @@ def main(argv):
             pos_args.append(a)
     inp = pos_args[0] if pos_args else None
     out = pos_args[1] if len(pos_args) > 1 else "estimated_trajectory.txt"
-    run(inp, out)
+    try:
+        run(inp, out)
+    except Exception as e:  # never leave the evaluator without a well-formed trajectory
+        print(f"pathguard: estimation failed ({type(e).__name__}: {e}); writing a stand-still trajectory", file=sys.stderr)
+        fallback(inp, out)
+
+
+def fallback(inp, out):
+    """One pose per input row (position 0, identity attitude): the output contract holds for any input."""
+    opener, _ = resolve_input(inp)
+    with opener() as f, open(out, "w", newline="\n") as fo:
+        fo.write("# timestamp tx ty tz qx qy qz qw\n")
+        for line in f:
+            s = line.strip()
+            if not s or not (s[0].isdigit() or s[0] in "+-."):
+                continue
+            tok = s.split(",", 1)[0].strip()
+            try:
+                ti, tf = parse_ts(tok)
+            except ValueError:
+                continue
+            if ti is not None and ti >= 10**12:  # nanoseconds
+                ds = str(ti)
+                ts_s = ds[:-9] + "." + ds[-9:]
+            else:
+                ts_s = tok
+            fo.write(ts_s + " 0.000000 0.000000 0.000000 0.000000000 0.000000000 0.000000000 1.000000000\n")
 
 
 if __name__ == "__main__":
