@@ -342,3 +342,8 @@ another cwd with -I, cd src, runpy, exec without __file__ from repo or src, impo
 output with one pose per row (29480/29480) and a stderr message. Contract 18/18, ESKF test pass.
 Worst-case traced peak: 3.13: 7.86 -> 2.91 (MH_02) / 3.15 MB (room2); 3.10: 6.90 -> 2.25 / 2.18 MB.
 Largest single-stage parse 1.95 MB (3.13).
+
+## 2026-11-22 — runtime: inlined timestamp parsing in both passes, tuple unpack in the spike test (kept)
+Output bit-identical on the 7 reference inputs; contract 18/18. measure.py (fresh process, everything incl.
+loading the stages, median of 3): MH_02 4.11 ms/s, room2 4.45 ms/s (was ~5.8-6.2); worst-case traced peak
+2.99 / 2.78 MB. Floor for any pure-Python reader (parse the CSV twice + format the output): ~0.9 ms/s.

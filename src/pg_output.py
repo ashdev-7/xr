@@ -40,11 +40,15 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL=(0.0,
                 c = s[0]
                 if not (c.isdigit() or c in "+-."):
                     continue
-                tok = s.split(",", 1)[0].strip()
-                try:
-                    ti, tf = parse_ts(tok)
+                k = s.find(",")
+                tok = (s[:k] if k >= 0 else s).strip()
+                try:  # parse_ts, inlined (hot loop)
+                    ti, tf = int(tok), None
                 except ValueError:
-                    continue
+                    try:
+                        ti, tf = None, float(tok)
+                    except ValueError:
+                        continue
                 if ti is not None and t0i is not None:
                     t = (ti - t0i) * tsc
                 else:

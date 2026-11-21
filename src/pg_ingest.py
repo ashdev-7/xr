@@ -123,9 +123,9 @@ def ingest(opener, info):
 
     def spike(i):
         r = buf[i]
-        o = [buf[j] for j in range(5) if j != i]
+        o0, o1, o2, o3 = [buf[j] for j in range(5) if j != i]
         for c in range(1, 7):
-            v = sorted((o[0][c], o[1][c], o[2][c], o[3][c]))
+            v = sorted((o0[c], o1[c], o2[c], o3[c]))
             if abs(r[c] - 0.5 * (v[1] + v[2])) <= kk * (sig_g if c <= 3 else sig_a):
                 return False
         return True
@@ -138,10 +138,13 @@ def ingest(opener, info):
             if " " in s or "\t" in s:
                 s = s.replace(" ", "").replace("\t", "")
             parts = s.split(",")
-            try:
-                ti, tf = parse_ts(parts[0])
+            try:  # parse_ts, inlined (hot loop)
+                ti, tf = int(parts[0]), None
             except ValueError:
-                continue
+                try:
+                    ti, tf = None, float(parts[0])
+                except ValueError:
+                    continue
             st["rows"] += 1
             t = (ti - t0i) * tsc if (ti is not None and t0i is not None) else \
                 ((ti if ti is not None else tf) - (t0i if t0i is not None else t0f)) * tsc
