@@ -35,15 +35,15 @@ P = dict(
     tilt_every=2,       # gravity update every N bins
     gyro_floor=2e-3,    # minimum gyro white noise per sample [rad/s]
     bg_rw=2e-5,         # base gyro bias random walk [rad/s/sqrt(s)]
-    bg_k=0.045,         # extra gyro bias RW per unit of jamming-induced gyro noise [1/sqrt(s)]
+    bg_k=0.002,         # extra gyro bias RW per unit severity [rad/s/sqrt(s)] (script: 6e-4 aware, ~1e-3..1e-2 as-is)
     gap_gyro_k=10.0,    # gyro noise inflation inside gaps
     bg0_sig=0.05,       # initial gyro bias uncertainty [rad/s] (EuRoC raw bias reaches ~0.08)
     # translation (per-second parameterisation, independent of knot_dt)
     sig_a=0.4,          # accel noise per knot [m/s^2] (scaled by sqrt(noise ratio))
     sig_gap=3.0,        # accel uncertainty where there is no data [m/s^2]
     ba_rw=5e-4,         # base accel bias random walk [m/s^2/sqrt(s)]
-    ba_k=0.045,         # extra accel bias RW per unit of jamming-induced accel noise
-    ba_kz=0.0,          # extra vertical bias RW per unit of jamming level (scale-factor drift)
+    ba_k=0.01,          # extra accel bias RW per unit severity [m/s^2/sqrt(s)] (script: 0.01 aware)
+    ba_kz=0.015,        # extra vertical bias RW per unit severity (1.5e-3 scale drift x g)
     sig_c=0.2,          # workspace-centre random walk [m/sqrt(s)]
     sig_v_h=0.3,        # speed prior, horizontal [m/s]
     sig_v_z=0.1,        # speed prior, vertical [m/s]
@@ -237,21 +237,29 @@ def row_reader(opener, info):
 
 # ----------------------------------------------------------------------------- jamming meter
 def noise_meter(opener, info):
-    """Per-second robust white-noise level of gyro and accel (MAD of second differences),
+    """Per-second statistics in one streaming pass:
+      * robust white-noise level of gyro and accel (MAD of second differences of valid rows)
+      * unique timestamps present (-> missing rows = packet loss)
     and the time of the last valid row (IMU failure)."""
     dt_nom = info["dt_nom"]
-    win = 1.0
     sg, sa = array("f"), array("f")
+    present = array("H")
     bg, ba = [], []
     w_idx = 0
+    npres = 0
     p1 = p2 = None  # previous two valid rows (t, 6 values)
     t_last_valid = 0.0
     last = None
+    last_t = None
     n_valid = 0
     for r in row_reader(opener, info):
         t = r[0]
-        while t >= (w_idx + 1) * win:
-            sg.append(_mad_sigma(bg)); sa.append(_mad_sigma(ba)); bg, ba = [], []; w_idx += 1
+        while t >= w_idx + 1.0:
+            sg.append(_mad_sigma(bg)); sa.append(_mad_sigma(ba)); present.append(min(npres, 65535))
+            bg, ba = [], []; npres = 0; w_idx += 1
+        if t != last_t:
+            npres += 1
+            last_t = t
         if not r[7]:
             continue
         vals = r[1:7]
@@ -268,8 +276,8 @@ def noise_meter(opener, info):
                 bg.append(abs(a[0] - 2 * b[0] + c[0])); bg.append(abs(a[1] - 2 * b[1] + c[1])); bg.append(abs(a[2] - 2 * b[2] + c[2]))
                 ba.append(abs(a[3] - 2 * b[3] + c[3])); ba.append(abs(a[4] - 2 * b[4] + c[4])); ba.append(abs(a[5] - 2 * b[5] + c[5]))
         p2, p1 = p1, (t, vals)
-    sg.append(_mad_sigma(bg)); sa.append(_mad_sigma(ba))
-    return sg, sa, t_last_valid, n_valid
+    sg.append(_mad_sigma(bg)); sa.append(_mad_sigma(ba)); present.append(min(npres, 65535))
+    return sg, sa, present, t_last_valid, n_valid
 
 
 def _mad_sigma(x):
@@ -279,38 +287,69 @@ def _mad_sigma(x):
     return 1.4826 * x[len(x) // 2] / math.sqrt(6.0)
 
 
-def fit_ramp(sig, T):
-    """Fit sigma(t)^2 = s0^2 + A^2 (t/T)^(2 gamma) to per-second noise levels (weighted LS, grid on gamma).
-    Returns (s0, A, gamma). This is the jamming level: the official degradation scales every
-    impairment (white noise, bias drift, scale drift, spikes, drops) by one severity ramp."""
-    pts = [((i + 0.5) / max(T, 1e-9), s * s) for i, s in enumerate(sig) if s > 0 and (i + 0.5) <= T]
-    if len(pts) < 5:
-        return (max([s for s in sig if s > 0] or [0.0]), 0.0, 1.7)
-    best = None
-    for gi in range(4, 25):
-        g = gi * 0.125
-        # linear LS for y = c0 + c1 * x,  x = r^(2g); weights 1/y (relative errors)
-        S = Sx = Sy = Sxx = Sxy = 0.0
-        for r, y in pts:
-            x = min(r, 1.0) ** (2 * g)
-            w = 1.0 / (y * y + 1e-30)
-            S += w; Sx += w * x; Sy += w * y; Sxx += w * x * x; Sxy += w * x * y
-        den = S * Sxx - Sx * Sx
-        if abs(den) < 1e-300:
+def smooth_levels(sig, T_L):
+    """Fill missing windows and apply a 5-window running median (robust per-second noise level)."""
+    n = len(sig)
+    good = [x for i, x in enumerate(sig) if x > 0 and i <= T_L]
+    fill = sorted(good)[len(good) // 2] if good else 0.0
+    v = [x if x > 0 else -1.0 for x in sig]
+    out = array("f", bytes(4 * n))
+    for i in range(n):
+        w = [x for x in v[max(0, i - 2):i + 3] if x > 0]
+        out[i] = sorted(w)[len(w) // 2] if w else fill
+    return out
+
+
+def fit_severity(present, dt_nom, T_L, T_end):
+    """Jamming level from packet loss. The official degradation drops rows with probability
+    0.06 s per row plus bursts (start prob 0.0015 s, length U[5, 5 + 45 s]); s(t) = L (t/T)^gamma is the
+    single severity that also scales noise, bias drift, scale drift, spikes and frozen samples.
+    Fit (L, gamma) by least squares on the per-second missing-row counts (failure window excluded)."""
+    exp_per_win = 1.0 / dt_nom
+    pts = []
+    for i, n in enumerate(present):
+        if i + 1.0 > T_L or i < 2:  # skip the failure window, the last partial second and the protected start
             continue
-        c1 = (S * Sxy - Sx * Sy) / den
-        c0 = (Sy - c1 * Sx) / S
-        c1 = max(c1, 0.0)
-        c0 = max(c0, 1e-12)
+        pts.append(((i + 0.5) / max(T_end, 1e-9), max(0.0, exp_per_win - n) / exp_per_win))
+    if len(pts) < 5:
+        return 0.0, 1.7
+
+    def miss(sv):
+        return 0.06 * sv + 0.0015 * sv * (5.0 + 22.5 * sv)
+    best = (1e30, 0.0, 1.7)
+
+    def fit_L(g):
+        xs = [r ** g for r, _ in pts]
+        ys = [y for _, y in pts]
+        lo, hi = 0.0, 3.0
+        for _ in range(28):  # ternary search on L (convex for fixed gamma)
+            m1, m2 = lo + (hi - lo) / 3, hi - (hi - lo) / 3
+            e1 = e2 = 0.0
+            for x, y in zip(xs, ys):
+                u1 = m1 * x; u2 = m2 * x
+                d1 = 0.0675 * u1 + 0.03375 * u1 * u1 - y; d2 = 0.0675 * u2 + 0.03375 * u2 * u2 - y
+                e1 += d1 * d1; e2 += d2 * d2
+            if e1 < e2:
+                hi = m2
+            else:
+                lo = m1
+        Lh = 0.5 * (lo + hi)
         e = 0.0
-        for r, y in pts:
-            m = c0 + c1 * min(r, 1.0) ** (2 * g)
-            e += (math.log(y) - math.log(m)) ** 2
-        if best is None or e < best[0]:
-            best = (e, math.sqrt(c0), math.sqrt(c1), g)
-    if best is None:
-        return (0.0, 0.0, 1.7)
-    return best[1], best[2], best[3]
+        for x, y in zip(xs, ys):
+            u = Lh * x; d = 0.0675 * u + 0.03375 * u * u - y; e += d * d
+        return e, Lh
+    for g in (0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0):
+        e, Lh = fit_L(g)
+        if e < best[0]:
+            best = (e, Lh, g)
+    g0 = best[2]
+    for g in (g0 - 0.375, g0 - 0.25, g0 - 0.125, g0 + 0.125, g0 + 0.25, g0 + 0.375):
+        if g <= 0.25:
+            continue
+        e, Lh = fit_L(g)
+        if e < best[0]:
+            best = (e, Lh, g)
+    return best[1], best[2]
 
 
 # ----------------------------------------------------------------------------- pass B: integrity + bins
@@ -493,22 +532,43 @@ class Att:
 
     def predict(self, w, dt, qg2, qb2):
         """Propagate over dt (negative = backward) with body rate w. qg2: rotation noise var added,
-        qb2: bias RW var added."""
+        qb2: bias RW var added.  Error model: dtheta' = dtheta - dt R dbg  (F = [[I, -dt R], [0, I]]):
+            A' = A - dt (R B' + B R') + dt^2 R C R' + qg2 I,   B' = B - dt R C,   C' = C + qb2 I."""
         bg = self.bg
         q = self.q
+        qw, qx, qy, qz = q
         self.q = qnorm(qmul(q, qexp((w[0] - bg[0]) * dt, (w[1] - bg[1]) * dt, (w[2] - bg[2]) * dt)))
-        # dtheta' = dtheta - dt * R dbg  (world-frame error, F = [[I, -dt R], [0, I]])
-        R = qmat(q)
-        A, B, C = self.A, self.B, self.C
-        RC = m3mul(R, C)
-        RB = m3mul(R, m3T(B))          # R B^T  (3x3)
-        # A' = A - dt (R B^T + B R^T) + dt^2 R C R^T + qg2 I
-        RCRt = m3mul(RC, m3T(R))
-        An = tuple(tuple(A[i][j] - dt * (RB[i][j] + RB[j][i]) + dt * dt * RCRt[i][j] + (qg2 if i == j else 0.0)
-                         for j in range(3)) for i in range(3))
-        Bn = m3add(B, RC, -dt)         # B' = B - dt R C
-        Cn = ((C[0][0] + qb2, C[0][1], C[0][2]), (C[1][0], C[1][1] + qb2, C[1][2]), (C[2][0], C[2][1], C[2][2] + qb2))
-        self.A, self.B, self.C = An, Bn, Cn
+        # rotation matrix of the pre-step attitude
+        r00 = 1 - 2 * (qy * qy + qz * qz); r01 = 2 * (qx * qy - qw * qz); r02 = 2 * (qx * qz + qw * qy)
+        r10 = 2 * (qx * qy + qw * qz); r11 = 1 - 2 * (qx * qx + qz * qz); r12 = 2 * (qy * qz - qw * qx)
+        r20 = 2 * (qx * qz - qw * qy); r21 = 2 * (qy * qz + qw * qx); r22 = 1 - 2 * (qx * qx + qy * qy)
+        (a00, a01, a02), (_, a11, a12), (_, _, a22) = self.A
+        (b00, b01, b02), (b10, b11, b12), (b20, b21, b22) = self.B
+        (c00, c01, c02), (_, c11, c12), (_, _, c22) = self.C
+        # RC = R C
+        e00 = r00 * c00 + r01 * c01 + r02 * c02; e01 = r00 * c01 + r01 * c11 + r02 * c12; e02 = r00 * c02 + r01 * c12 + r02 * c22
+        e10 = r10 * c00 + r11 * c01 + r12 * c02; e11 = r10 * c01 + r11 * c11 + r12 * c12; e12 = r10 * c02 + r11 * c12 + r12 * c22
+        e20 = r20 * c00 + r21 * c01 + r22 * c02; e21 = r20 * c01 + r21 * c11 + r22 * c12; e22 = r20 * c02 + r21 * c12 + r22 * c22
+        # M = R B'  (M_ij = sum_k R_ik B_jk)
+        m00 = r00 * b00 + r01 * b01 + r02 * b02; m01 = r00 * b10 + r01 * b11 + r02 * b12; m02 = r00 * b20 + r01 * b21 + r02 * b22
+        m10 = r10 * b00 + r11 * b01 + r12 * b02; m11 = r10 * b10 + r11 * b11 + r12 * b12; m12 = r10 * b20 + r11 * b21 + r12 * b22
+        m20 = r20 * b00 + r21 * b01 + r22 * b02; m21 = r20 * b10 + r21 * b11 + r22 * b12; m22 = r20 * b20 + r21 * b21 + r22 * b22
+        # S = R C R'
+        s00 = e00 * r00 + e01 * r01 + e02 * r02; s01 = e00 * r10 + e01 * r11 + e02 * r12; s02 = e00 * r20 + e01 * r21 + e02 * r22
+        s11 = e10 * r10 + e11 * r11 + e12 * r12; s12 = e10 * r20 + e11 * r21 + e12 * r22
+        s22 = e20 * r20 + e21 * r21 + e22 * r22
+        d2 = dt * dt
+        n00 = a00 - 2 * dt * m00 + d2 * s00 + qg2
+        n01 = a01 - dt * (m01 + m10) + d2 * s01
+        n02 = a02 - dt * (m02 + m20) + d2 * s02
+        n11 = a11 - 2 * dt * m11 + d2 * s11 + qg2
+        n12 = a12 - dt * (m12 + m21) + d2 * s12
+        n22 = a22 - 2 * dt * m22 + d2 * s22 + qg2
+        self.A = ((n00, n01, n02), (n01, n11, n12), (n02, n12, n22))
+        self.B = ((b00 - dt * e00, b01 - dt * e01, b02 - dt * e02),
+                  (b10 - dt * e10, b11 - dt * e11, b12 - dt * e12),
+                  (b20 - dt * e20, b21 - dt * e21, b22 - dt * e22))
+        self.C = ((c00 + qb2, c01, c02), (c01, c11 + qb2, c12), (c02, c12, c22 + qb2))
 
     def gravity(self, f, sig):
         """f: mean body specific force. Measurement z = (R f / |f|)_xy  ~ (-dth_y, dth_x)."""
@@ -611,14 +671,13 @@ def initial_attitude(gsum, asum, cnt, nb, sg):
     return q0, bg0, g, best, bestv
 
 
-def attitude(gsum, asum, cnt, nb, sg, sa, ramp_g, ramp_a, T_L, gmag):
+def attitude(gsum, asum, cnt, nb, T_L, gmag):
     """Forward + backward ESKF over bins; returns smoothed quaternion at every bin boundary (nb+1)."""
     bdt = P["bin_dt"]
     every = max(1, int(P["tilt_every"]))
     dt_nom = INFO["dt_nom"]
-    nw = len(sg)
-    s0g, Ag, gg = ramp_g
     adapt = P["adapt"]
+    n_tilt = max(1.0, every * bdt / dt_nom)  # samples averaged per gravity update
 
     # gyro for empty bins: linear interpolation between neighbouring filled bins (filled in place)
     filled = array("b", bytes(nb))
@@ -645,23 +704,15 @@ def attitude(gsum, asum, cnt, nb, sg, sa, ramp_g, ramp_a, T_L, gmag):
             # cnt stays 0: marks interpolated
 
     def gyro_var(b):
-        """Rotation noise variance over one bin."""
-        w = min(nw - 1, int(b * bdt))
-        if adapt and Ag > 0:
-            r = min(1.0, b * bdt / max(T_L, 1e-9))
-            s = math.sqrt(s0g * s0g + (Ag * r ** gg) ** 2)
-        else:
-            s = sg[w] if sg[w] > 0 else s0g
-        s = max(s, P["gyro_floor"])
-        c = cnt[b]
-        v = s * s * dt_nom * bdt  # white rate noise integrated over the bin
-        if not c:
+        """Rotation noise variance over one bin: measured white gyro noise integrated over the bin."""
+        sg_ = max(sigma_g(b * bdt), P["gyro_floor"]) if adapt else P["gyro_floor"]
+        v = sg_ * sg_ * dt_nom * bdt
+        if not cnt[b]:
             v *= P["gap_gyro_k"] ** 2
         return v
 
     def bias_var(b):
-        r = min(1.0, b * bdt / max(T_L, 1e-9))
-        q = P["bg_rw"] + (P["bg_k"] * Ag * r ** gg if adapt else 0.0)
+        q = P["bg_rw"] + (P["bg_k"] * sev_at(b * bdt) if adapt else 0.0)
         return q * q * bdt
 
     def tilt_sig(f, b):
@@ -670,11 +721,9 @@ def attitude(gsum, asum, cnt, nb, sg, sa, ramp_g, ramp_a, T_L, gmag):
         if dev > P["tilt_gate"]:
             return None
         s2 = P["tilt_sig"] ** 2 + (P["tilt_k"] * dev) ** 2
-        if adapt and ramp_a[1] > 0:
-            r = min(1.0, b * bdt / max(T_L, 1e-9))
-            s0a, Aa, ga = ramp_a
-            ratio = (s0a * s0a + (Aa * r ** ga) ** 2) / max(s0a * s0a, 1e-12)
-            s2 *= math.sqrt(ratio)
+        if adapt:
+            sa_ = sigma_a(b * bdt)
+            s2 += sa_ * sa_ / (n_tilt * gmag * gmag)
         return math.sqrt(s2)
 
     q0, bg0, _g, _best, _v = INIT
@@ -798,7 +847,7 @@ def chol_solve6(A, B, C, d):
 
 
 # ----------------------------------------------------------------------------- stage D: translation
-def translation(asum, cnt, nb, qs, T_L, T_end, ramp_a):
+def translation(asum, cnt, nb, qs, T_L, T_end):
     """World acceleration on knots -> per-axis Kalman filter + RTS smoother with motion prior."""
     bdt, kdt = P["bin_dt"], P["knot_dt"]
     per = max(1, int(round(kdt / bdt)))
@@ -829,115 +878,144 @@ def translation(asum, cnt, nb, qs, T_L, T_end, ramp_a):
             c = kcnt[j]
             kacc[3 * j] /= c; kacc[3 * j + 1] /= c; kacc[3 * j + 2] = kacc[3 * j + 2] / c - gz
     need = max(1, per // 3)
-    s0a, Aa, ga = ramp_a
     adapt = P["adapt"]
-
-    def noise_ratio(j):
-        if not adapt or Aa <= 0:
-            return 1.0
-        r = min(1.0, j * kdt / max(T_L, 1e-9))
-        return math.sqrt((s0a * s0a + (Aa * r ** ga) ** 2) / max(s0a * s0a, 1e-12))
-
-    def sev(j):
-        r = min(1.0, j * kdt / max(T_L, 1e-9))
-        return r ** ga
+    n_knot = max(1.0, kdt / INFO["dt_nom"])
 
     pos = array("d", bytes(8 * 3 * K))
     vel = array("d", bytes(8 * 3 * K))
-    xs_store = array("d", bytes(8 * 4 * K))
-    Ps_store = array("d", bytes(8 * 10 * K))
     dt = kdt
-    F = ((1.0, dt, -0.5 * dt * dt, 0.0), (0.0, 1.0, -dt, 0.0), (0.0, 0.0, 1.0, 0.0), (0.0, 0.0, 0.0, 1.0))
+    h = 0.5 * dt * dt
+    # per-step model terms shared by the three axes: input known?, accel noise, bias random walk
+    known = array("b", bytes(K))
+    qa_ = array("d", bytes(8 * K))
+    qbh_ = array("d", bytes(8 * K))
+    qbz_ = array("d", bytes(8 * K))
+    for j in range(K):
+        tj = j * kdt
+        kn = kcnt[j] >= need and j < KL + 1
+        known[j] = 1 if kn else 0
+        if kn:
+            qa_[j] = P["sig_a"] ** 2 + (sigma_a(tj) ** 2 / n_knot if adapt else 0.0)
+        else:
+            qa_[j] = P["sig_gap"] ** 2
+        sv = sev_at(tj) if adapt else 0.0
+        qb = P["ba_rw"] + P["ba_k"] * sv
+        qbh_[j] = qb * qb * dt
+        qbz_[j] = (qb * qb + (P["ba_kz"] * sv) ** 2) * dt
+    qc = P["sig_c"] ** 2 * dt
+    g0, g1 = h, dt
+    store = array("d", bytes(8 * 14 * K))  # filtered mean (4) + covariance upper triangle (10)
     for ax in range(3):
         horiz = ax < 2
-        sv = (P["sig_v_h"] if horiz else P["sig_v_z"])
-        sp = (P["sig_p_h"] if horiz else P["sig_p_z"])
-        rv, rp = sv * sv, sp * sp
-
-        def model(j):
-            """Input accel and process noise for the step j -> j+1."""
-            known = kcnt[j] >= need and j < KL + 1
-            a = kacc[3 * j + ax] if known else 0.0
-            if known:
-                sa = P["sig_a"] * math.sqrt(noise_ratio(j))
-            else:
-                sa = P["sig_gap"]
-            qb = P["ba_rw"] + (P["ba_k"] * Aa * sev(j) if adapt else 0.0)
-            if not horiz and adapt:
-                qb = math.sqrt(qb * qb + (P["ba_kz"] * sev(j)) ** 2)
-            return a, sa * sa, qb * qb * dt, P["sig_c"] ** 2 * dt
-
-        x = [0.0, 0.0, 0.0, 0.0]
-        C = [[1e-6, 0, 0, 0], [0, 0.5, 0, 0], [0, 0, 0.1, 0], [0, 0, 0, rp]]
+        sv_ = P["sig_v_h"] if horiz else P["sig_v_z"]
+        sp_ = P["sig_p_h"] if horiz else P["sig_p_z"]
+        # continuous-time prior: pseudo-measurement variance scales with 1/rate so the prior's information
+        # per second is independent of the knot spacing (values are calibrated at 10 Hz knots)
+        rv, rp = sv_ * sv_ * (0.1 / dt), sp_ * sp_ * (0.1 / dt)
+        qb_ = qbh_ if horiz else qbz_
+        # state x = [p, v, b, c]; covariance entries named cIJ (symmetric)
+        x0 = x1 = x2 = x3 = 0.0
+        c00, c01, c02, c03, c11, c12, c13, c22, c23, c33 = 1e-6, 0.0, 0.0, 0.0, 0.5, 0.0, 0.0, 0.1, 0.0, rp
         for j in range(K):
             if j > 0:
-                a, qa, qb, qc = model(j - 1)
-                x, C = kf_predict(x, C, F, a, dt, qa, qb, qc)
-            # motion prior pseudo-measurements: v = 0, p - c = 0
-            x, C = kf_update(x, C, (0.0, 1.0, 0.0, 0.0), 0.0, rv)
-            x, C = kf_update(x, C, (1.0, 0.0, 0.0, -1.0), 0.0, rp)
-            xs_store[4 * j:4 * j + 4] = array("d", x)
-            Ps_store[10 * j:10 * j + 10] = array("d", (C[0][0], C[0][1], C[0][2], C[0][3], C[1][1], C[1][2], C[1][3], C[2][2], C[2][3], C[3][3]))
-        # RTS (mean only)
-        xs = list(xs_store[4 * (K - 1):4 * K])
-        pos[3 * (K - 1) + ax] = xs[0]; vel[3 * (K - 1) + ax] = xs[1]
+                i = j - 1
+                acc = kacc[3 * i + ax] if known[i] else 0.0
+                qa = qa_[i]
+                # mean: p += dt v - h b + h a ; v += -dt b + dt a
+                x0 = x0 + dt * x1 - h * x2 + h * acc
+                x1 = x1 - dt * x2 + dt * acc
+                # covariance F C F' + Q with F = [[1, dt, -h, 0], [0, 1, -dt, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
+                t00 = c00 + dt * c01 - h * c02; t01 = c01 + dt * c11 - h * c12; t02 = c02 + dt * c12 - h * c22
+                t03 = c03 + dt * c13 - h * c23
+                t11 = c11 - dt * c12; t12 = c12 - dt * c22; t13 = c13 - dt * c23
+                t10 = c01 - dt * c02
+                n00 = t00 + dt * t01 - h * t02
+                n01 = t01 - dt * t02
+                n02 = t02
+                n03 = t03
+                n11 = t11 - dt * t12
+                n12 = t12
+                n13 = t13
+                c00 = n00 + g0 * g0 * qa; c01 = n01 + g0 * g1 * qa; c02 = n02; c03 = n03
+                c11 = n11 + g1 * g1 * qa; c12 = n12; c13 = n13
+                c22 = c22 + qb_[i]; c33 = c33 + qc
+            # pseudo-measurement v = 0 (variance rv)
+            S = c11 + rv
+            k0, k1, k2, k3 = c01 / S, c11 / S, c12 / S, c13 / S
+            inn = -x1
+            x0 += k0 * inn; x1 += k1 * inn; x2 += k2 * inn; x3 += k3 * inn
+            p0, p1, p2, p3 = c01, c11, c12, c13
+            c00 -= k0 * p0; c01 -= k0 * p1; c02 -= k0 * p2; c03 -= k0 * p3
+            c11 -= k1 * p1; c12 -= k1 * p2; c13 -= k1 * p3
+            c22 -= k2 * p2; c23 -= k2 * p3; c33 -= k3 * p3
+            # pseudo-measurement p - c = 0 (variance rp)
+            p0, p1, p2, p3 = c00 - c03, c01 - c13, c02 - c23, c03 - c33
+            S = p0 - p3 + rp
+            k0, k1, k2, k3 = p0 / S, p1 / S, p2 / S, p3 / S
+            inn = -(x0 - x3)
+            x0 += k0 * inn; x1 += k1 * inn; x2 += k2 * inn; x3 += k3 * inn
+            c00 -= k0 * p0; c01 -= k0 * p1; c02 -= k0 * p2; c03 -= k0 * p3
+            c11 -= k1 * p1; c12 -= k1 * p2; c13 -= k1 * p3
+            c22 -= k2 * p2; c23 -= k2 * p3; c33 -= k3 * p3
+            o = 14 * j
+            store[o] = x0; store[o + 1] = x1; store[o + 2] = x2; store[o + 3] = x3
+            store[o + 4] = c00; store[o + 5] = c01; store[o + 6] = c02; store[o + 7] = c03; store[o + 8] = c11
+            store[o + 9] = c12; store[o + 10] = c13; store[o + 11] = c22; store[o + 12] = c23; store[o + 13] = c33
+        # RTS smoother (mean only): xs_j = xf_j + Pf F' Pp^-1 (xs_{j+1} - xp_{j+1})
+        o = 14 * (K - 1)
+        s0, s1, s2, s3 = store[o], store[o + 1], store[o + 2], store[o + 3]
+        pos[3 * (K - 1) + ax] = s0; vel[3 * (K - 1) + ax] = s1
         for j in range(K - 2, -1, -1):
-            xf = list(xs_store[4 * j:4 * j + 4])
-            p = Ps_store[10 * j:10 * j + 10]
-            Pf = [[p[0], p[1], p[2], p[3]], [p[1], p[4], p[5], p[6]], [p[2], p[5], p[7], p[8]], [p[3], p[6], p[8], p[9]]]
-            a, qa, qb, qc = model(j)
-            xp, Pp = kf_predict(xf, Pf, F, a, dt, qa, qb, qc)
-            Pi = inv4(Pp)
-            if Pi is None:
-                xs = xf
+            o = 14 * j
+            f0, f1, f2, f3 = store[o], store[o + 1], store[o + 2], store[o + 3]
+            c00, c01, c02, c03, c11, c12, c13, c22, c23, c33 = store[o + 4:o + 14]
+            acc = kacc[3 * j + ax] if known[j] else 0.0
+            qa = qa_[j]
+            # prediction j -> j+1 (same algebra as the forward pass)
+            xp0 = f0 + dt * f1 - h * f2 + h * acc
+            xp1 = f1 - dt * f2 + dt * acc
+            t00 = c00 + dt * c01 - h * c02; t01 = c01 + dt * c11 - h * c12; t02 = c02 + dt * c12 - h * c22
+            t03 = c03 + dt * c13 - h * c23
+            t11 = c11 - dt * c12; t12 = c12 - dt * c22; t13 = c13 - dt * c23
+            a00 = t00 + dt * t01 - h * t02 + g0 * g0 * qa
+            a01 = t01 - dt * t02 + g0 * g1 * qa
+            a02 = t02; a03 = t03
+            a11 = t11 - dt * t12 + g1 * g1 * qa
+            a12 = t12; a13 = t13
+            a22 = c22 + qb_[j]; a23 = c23; a33 = c33 + qc
+            # y = Pp^-1 d  (Cholesky of the 4x4 predicted covariance)
+            d0, d1, d2, d3 = s0 - xp0, s1 - xp1, s2 - f2, s3 - f3
+            if a00 <= 0:
+                s0, s1, s2, s3 = f0, f1, f2, f3
             else:
-                # G = Pf F^T Pp^-1
-                PFt = [[sum(Pf[r][k] * F[c][k] for k in range(4)) for c in range(4)] for r in range(4)]
-                G = [[sum(PFt[r][k] * Pi[k][c] for k in range(4)) for c in range(4)] for r in range(4)]
-                d = [xs[k] - xp[k] for k in range(4)]
-                xs = [xf[r] + sum(G[r][k] * d[k] for k in range(4)) for r in range(4)]
-            pos[3 * j + ax] = xs[0]; vel[3 * j + ax] = xs[1]
+                l00 = math.sqrt(a00); l10 = a01 / l00; l20 = a02 / l00; l30 = a03 / l00
+                e = a11 - l10 * l10
+                if e <= 0:
+                    s0, s1, s2, s3 = f0, f1, f2, f3
+                else:
+                    l11 = math.sqrt(e); l21 = (a12 - l20 * l10) / l11; l31 = (a13 - l30 * l10) / l11
+                    e = a22 - l20 * l20 - l21 * l21
+                    if e <= 0:
+                        s0, s1, s2, s3 = f0, f1, f2, f3
+                    else:
+                        l22 = math.sqrt(e); l32 = (a23 - l30 * l20 - l31 * l21) / l22
+                        e = a33 - l30 * l30 - l31 * l31 - l32 * l32
+                        if e <= 0:
+                            s0, s1, s2, s3 = f0, f1, f2, f3
+                        else:
+                            l33 = math.sqrt(e)
+                            z0 = d0 / l00; z1 = (d1 - l10 * z0) / l11; z2 = (d2 - l20 * z0 - l21 * z1) / l22
+                            z3 = (d3 - l30 * z0 - l31 * z1 - l32 * z2) / l33
+                            y3 = z3 / l33; y2 = (z2 - l32 * y3) / l22; y1 = (z1 - l21 * y2 - l31 * y3) / l11
+                            y0 = (z0 - l10 * y1 - l20 * y2 - l30 * y3) / l00
+                            # u = F' y ; delta = Pf u
+                            u0 = y0; u1 = dt * y0 + y1; u2 = -h * y0 - dt * y1 + y2; u3 = y3
+                            s0 = f0 + c00 * u0 + c01 * u1 + c02 * u2 + c03 * u3
+                            s1 = f1 + c01 * u0 + c11 * u1 + c12 * u2 + c13 * u3
+                            s2 = f2 + c02 * u0 + c12 * u1 + c22 * u2 + c23 * u3
+                            s3 = f3 + c03 * u0 + c13 * u1 + c23 * u2 + c33 * u3
+            pos[3 * j + ax] = s0; vel[3 * j + ax] = s1
     return pos, vel, K, kdt, gz
-
-
-def kf_predict(x, C, F, a, dt, qa, qb, qc):
-    nx = [sum(F[i][k] * x[k] for k in range(4)) for i in range(4)]
-    nx[0] += 0.5 * dt * dt * a
-    nx[1] += dt * a
-    T = [[sum(F[i][k] * C[k][j] for k in range(4)) for j in range(4)] for i in range(4)]
-    N = [[sum(T[i][k] * F[j][k] for k in range(4)) for j in range(4)] for i in range(4)]
-    g0, g1 = 0.5 * dt * dt, dt
-    N[0][0] += g0 * g0 * qa; N[0][1] += g0 * g1 * qa; N[1][0] += g0 * g1 * qa; N[1][1] += g1 * g1 * qa
-    N[2][2] += qb; N[3][3] += qc
-    return nx, N
-
-
-def kf_update(x, C, h, z, r):
-    Ph = [sum(C[i][k] * h[k] for k in range(4)) for i in range(4)]
-    S = r + sum(h[i] * Ph[i] for i in range(4))
-    inn = z - sum(h[i] * x[i] for i in range(4))
-    k = [p / S for p in Ph]
-    x = [x[i] + k[i] * inn for i in range(4)]
-    C = [[C[i][j] - k[i] * Ph[j] for j in range(4)] for i in range(4)]
-    return x, C
-
-
-def inv4(A):
-    M = [list(A[i]) + [1.0 if j == i else 0.0 for j in range(4)] for i in range(4)]
-    for c in range(4):
-        p = max(range(c, 4), key=lambda r: abs(M[r][c]))
-        if abs(M[p][c]) < 1e-300:
-            return None
-        if p != c:
-            M[p], M[c] = M[c], M[p]
-        d = M[c][c]
-        M[c] = [v / d for v in M[c]]
-        for r in range(4):
-            if r != c:
-                f = M[r][c]
-                if f:
-                    M[r] = [M[r][k] - f * M[c][k] for k in range(8)]
-    return [row[4:] for row in M]
 
 
 # ----------------------------------------------------------------------------- pass E: output
@@ -1026,31 +1104,52 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L):
 # ----------------------------------------------------------------------------- main
 INFO = {}
 INIT = None
+JAM = dict(L=0.0, gamma=1.7, T=1.0, sg=None, sa=None)
 
 
-def run(inp, out_path):
+def sev_at(t):
+    """Estimated jamming severity at time t (0 = clean, ~1 = maximum of the official script)."""
+    r = t / JAM["T"]
+    if r <= 0:
+        return 0.0
+    return JAM["L"] * (r if r < 1 else 1.0) ** JAM["gamma"]
+
+
+def sigma_g(t):
+    a = JAM["sg"]
+    return a[min(len(a) - 1, int(t))] if t > 0 else a[0]
+
+
+def sigma_a(t):
+    a = JAM["sa"]
+    return a[min(len(a) - 1, int(t))] if t > 0 else a[0]
+
+
+def run(inp, out_path, hook=None):
+    """hook (development only): optional callable(stage, data) -> data, used by offline oracles."""
     global INFO, INIT
     opener, src = resolve_input(inp)
     info = survey(opener)
     INFO = info
-    sg, sa, T_L, n_valid = noise_meter(opener, info)
+    sg, sa, present, T_L, n_valid = noise_meter(opener, info)
     if n_valid < 10:
         raise SystemExit("fewer than 10 valid IMU rows")
-    ramp_g = fit_ramp(sg, T_L)
-    ramp_a = fit_ramp(sa, T_L)
-    gsum, asum, cnt, nb, st = preintegrate(opener, info, sg, sa, T_L)
+    T_end = max(info["t_end"], T_L)
+    L, gam = fit_severity(present, info["dt_nom"], T_L, T_end)
+    JAM.update(L=L, gamma=gam, T=max(T_end, 1e-9), sg=smooth_levels(sg, T_L), sa=smooth_levels(sa, T_L))
+    gsum, asum, cnt, nb, st = preintegrate(opener, info, JAM["sg"], JAM["sa"], T_L)
     INIT = initial_attitude(gsum, asum, cnt, nb, sg)
     gmag = INIT[2]
-    qs, bg_end = attitude(gsum, asum, cnt, nb, sg, sa, ramp_g, ramp_a, T_L, gmag)
-    # last row time (end of the blind window) from survey: approximate by the row reader in output pass
-    T_end = max(info["t_end"], T_L)
-    pos, vel, K, kdt, gz = translation(asum, cnt, nb, qs, T_L, T_end, ramp_a)
+    qs, bg_end = attitude(gsum, asum, cnt, nb, T_L, gmag)
+    if hook:
+        qs = hook("attitude", dict(qs=qs, nb=nb, info=info))
+    pos, vel, K, kdt, gz = translation(asum, cnt, nb, qs, T_L, T_end)
     n_out = write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L)
     log(f"src={src} rows={info['rows']} out={n_out} dt={info['dt_nom']:.5f} gyro_first={info['gyro_first']} "
         f"ascale={info['ascale']:.3f} T_L={T_L:.2f}s bins={nb} knots={K}")
     log(f"integrity {st}")
-    log(f"jamming gyro s0={ramp_g[0]:.4g} A={ramp_g[1]:.4g} gamma={ramp_g[2]:.3g} | accel s0={ramp_a[0]:.4g} "
-        f"A={ramp_a[1]:.4g} gamma={ramp_a[2]:.3g}")
+    log(f"jamming L={L:.3f} gamma={gam:.3f} | white noise gyro {JAM['sg'][2]:.4f}->{JAM['sg'][max(0, int(T_L) - 1)]:.4f} rad/s, "
+        f"accel {JAM['sa'][2]:.4f}->{JAM['sa'][max(0, int(T_L) - 1)]:.4f} m/s^2")
     log(f"init g={gmag:.4f} calm@{INIT[3]*P['bin_dt']:.2f}s var={INIT[4]:.2e} bg0={INIT[1]} bg_end={bg_end} gz={gz:.4f}")
     return n_out
 
