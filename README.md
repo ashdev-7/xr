@@ -132,8 +132,8 @@ imu0/data.csv
 
 | flight | length | ms per 1 s of IMU (budget 20) | heap: estimator data [MB] | heap: incl. interpreter compile of main.py [MB] |
 |---|---|---|---|---|
-| MH_02_easy | 152 s (29480 rows) | 6.86 | 1.85 | 7.82 |
-| TUMVI_room2 | 144 s (27879 rows) | 6.19 | 1.73 | 7.82 |
+| MH_02_easy | 152 s (29480 rows) | 5.34 | 1.85 | 7.74 |
+| TUMVI_room2 | 144 s (27879 rows) | 7.70 | 1.73 | 7.74 |
 <!-- RESULTS:END -->
 
 ![Error over time](figures/error_over_time.png)

@@ -41,10 +41,12 @@ P = dict(
     bg_rw=2e-5,         # base gyro bias random walk [rad/s/sqrt(s)]
     bg_k=0.002,         # extra gyro bias RW per unit severity [rad/s/sqrt(s)] (script: 6e-4 aware, ~1e-3..1e-2 as-is)
     gap_gyro_k=10.0,    # gyro noise inflation inside gaps
+    gap_alpha=2.0,      # unknown angular acceleration inside data gaps [rad/s^2] (rotation uncertainty ~ alpha L^1.5)
     bg0_sig=0.05,       # initial gyro bias uncertainty [rad/s] (EuRoC raw bias reaches ~0.08)
     # translation (per-second parameterisation, independent of knot_dt)
     sig_a=0.4,          # accel noise per knot [m/s^2] (scaled by sqrt(noise ratio))
-    sig_gap=3.0,        # accel uncertainty where there is no data [m/s^2]
+    sig_gap=3.0,        # accel uncertainty in the blind window after the failure [m/s^2]
+    sig_gap_in=1.5,     # accel uncertainty inside data gaps (dropouts) [m/s^2]
     ba_rw=5e-4,         # base accel bias random walk [m/s^2/sqrt(s)]
     ba_k=0.01,          # extra accel bias RW per unit severity [m/s^2/sqrt(s)] (script: 0.01 aware)
     ba_kz=0.015,        # extra vertical bias RW per unit severity (1.5e-3 scale drift x g)
@@ -699,6 +701,7 @@ def attitude(gsum, asum, cnt, nb, T_L, gmag):
 
     # gyro for empty bins: linear interpolation between neighbouring filled bins (filled in place)
     filled = array("b", bytes(nb))
+    glen = array("f", bytes(4 * nb))  # length [s] of the data gap each empty bin belongs to
     for b in range(nb):
         filled[b] = 1 if cnt[b] else 0
     b = 0
@@ -716,6 +719,7 @@ def attitude(gsum, asum, cnt, nb, T_L, gmag):
         wr = [gsum[3 * right + k] / cnt[right] for k in range(3)]
         span = right - left if right != left else 1
         for j in range(a0, b):
+            glen[j] = (b - a0) * bdt
             s = (j - left) / span if right != left else 0.0
             for k in range(3):
                 gsum[3 * j + k] = (1 - s) * wl[k] + s * wr[k]
@@ -726,7 +730,10 @@ def attitude(gsum, asum, cnt, nb, T_L, gmag):
         sg_ = max(sigma_g(b * bdt), P["gyro_floor"]) if adapt else P["gyro_floor"]
         v = sg_ * sg_ * dt_nom * bdt
         if not cnt[b]:
-            v *= P["gap_gyro_k"] ** 2
+            # inside a data gap the rate is interpolated; the unknown angular acceleration makes the rotation
+            # error grow like alpha * L per bin (total variance ~ alpha^2 L^3): ~2 deg for a 0.25 s burst,
+            # ~0.8 rad for a 2 s signal loss, so gravity can re-level the attitude right after a long gap
+            v = max(v * P["gap_gyro_k"] ** 2, (P["gap_alpha"] * glen[b] * bdt) ** 2)
         return v
 
     def bias_var(b):
@@ -929,8 +936,8 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
         known[j] = 1 if kn else 0
         if kn:
             qa_[j] = P["sig_a"] ** 2 + (sigma_a(tj) ** 2 / n_knot if adapt else 0.0)
-        else:
-            qa_[j] = P["sig_gap"] ** 2
+        else:  # no data: inside the log (dropout) or after the failure (blind window) use separate uncertainties
+            qa_[j] = (P["sig_gap"] if tj > T_L else P["sig_gap_in"]) ** 2
         sv = sev_at(tj) if adapt else 0.0
         qb = P["ba_rw"] + P["ba_k"] * sv
         qbh_[j] = qb * qb * dt

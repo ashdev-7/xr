@@ -282,3 +282,15 @@ Component switch-off (drone TRAIN, 2 scen, seed 42), ATE / BLIND: baseline 2.464
 workspace prior off (sig_p_h 100, sig_c 0.5) 5.914 / 10.381. The high-pass is the workspace/centre prior, and
 it is the same component that stops drift: slow motion and drift are not separable from the IMU here.
 Not run: noisy-speed oracle (moot after the learned speed model reached r = 0.22 / 0.47).
+
+## 2026-11-22 — 2-second signal losses (deck: "2-second signal loss"; dropout tier 10 pts + T3 bonus) (kept)
+Variants: official degradation (aware, seed 42) + three 2 s gaps (rows removed, FAQ representation) at 30/50/70 %
+of each flight (tools/bench/make_gaps.py). Before the fix, held-out 9 flights: ATE 2.623 vs stand-still 2.491
+(worse than standing still), DROP 2.705, RPE_r 8.5 deg. Cause: attitude uncertainty inside gaps grew only with
+10x gyro noise, so after a 2 s gap the filter trusted a wrong attitude (tilt errors 20-54 deg after gaps).
+Fix 1 (gap_alpha = 2 rad/s^2): rotation variance per empty bin (alpha L dt)^2, total ~alpha^2 L^3 (~2 deg for
+0.25 s, ~0.8 rad for 2 s). Held-out with gaps: ATE 2.623 -> 1.961, DROP 2.705 -> 2.009, RPE_r 8.5 -> 3.9 deg.
+Official-only data unchanged (1.729 -> 1.729).
+Fix 2: separate accel uncertainty inside gaps (sig_gap_in) from the blind window (sig_gap). Chosen on TRAIN:
+with gaps ATE 2.092 -> 2.026, DROP 2.101 -> 1.999; official ATE 1.696 -> 1.693, BLIND unchanged 1.315.
+Held-out confirmation: with gaps ATE 1.917, DROP 1.974 (stand-still 2.491 / 2.525); official 1.726.
