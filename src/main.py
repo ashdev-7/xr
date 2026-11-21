@@ -6,18 +6,22 @@ Samsung PRISM XR Hackathon 2026, Track 03 (Path Finder).
     python main.py [imu0/data.csv | dataset folder | dataset .zip] [estimated_trajectory.txt] [--param=value ...]
 
 Input : EuRoC-format IMU CSV (#timestamp[ns], w_x, w_y, w_z [rad/s], a_x, a_y, a_z [m/s^2]).
-Output: TUM trajectory (timestamp[s] tx ty tz qx qy qz qw), exactly one pose per input row,
-        including the rows of the 5 s after the IMU fails (dead-reckoned).
+Output: TUM trajectory (timestamp[s] tx ty tz qx qy qz qw), exactly one pose per input row, including
+        duplicated rows and the dead rows of the 5 s after the IMU fails. Nothing is appended.
 
-Pure Python standard library: no numpy, no compiled code. Memory grows with the number of
-50 Hz bins and 10 Hz knots, never with the number of rows, and the file is streamed three times:
+Pure Python standard library (no numpy, nothing to install). The file is streamed twice; memory grows
+with 20 ms bins and 10 Hz knots, never with the number of rows.
 
-  Pass A  survey      format/columns/units, timestamps, failure point, per-second noise ("jamming meter")
-  Pass 1  ingest      one streaming pass: integrity checks, jamming meter, preintegration into bins
-  Stage C attitude    error-state Kalman filter on bins, forward + backward, two-filter fusion
-  Stage D position    per-axis Kalman filter + RTS smoother on 10 Hz knots with a motion prior;
-                      the 5 s blind window is the same smoother with no data (prior-conditional forecast)
-  Pass E  output      re-read the timestamps, interpolate pose per row, write
+  pass 1       survey (header, column order, units) + one streaming pass: integrity checks (NaN, dead,
+               frozen/duplicate rows, six-channel spikes), jamming meter (packet loss, noise levels),
+               preintegration into bins, rest statistics
+  platform     rotor-vibration signature -> rotorcraft or handheld motion prior (learned per class)
+  attitude     error-state Kalman filter on [dtheta (world), gyro bias] + error-state RTS smoother;
+               gravity-direction updates, zero-angular-rate updates at rest
+  translation  per-axis Kalman filter + RTS smoother on 10 Hz knots, x = [p, v, accel bias, centre],
+               continuous-time motion prior, zero-velocity updates at rest, rotor-drag velocity
+               measurement for multirotors; the blind window is the same smoother with no data
+  pass 2       one pose per input row: attitude interpolated between bins, position by cubic Hermite
 """
 import math
 import os
@@ -97,11 +101,11 @@ def resolve_input(arg):
         for c in cands:
             p = os.path.join(arg, c)
             if os.path.isfile(p):
-                return (lambda p=p: open(p, "r", newline=None)), p
+                return (lambda p=p: open(p, "r", newline=None, encoding="utf-8-sig", errors="replace")), p
         for root, _dirs, files in os.walk(arg):
             if "data.csv" in files and os.path.basename(root) == "imu0":
                 p = os.path.join(root, "data.csv")
-                return (lambda p=p: open(p, "r", newline=None)), p
+                return (lambda p=p: open(p, "r", newline=None, encoding="utf-8-sig", errors="replace")), p
         zips = [f for f in os.listdir(arg) if f.lower().endswith(".zip")]
         if len(zips) == 1:
             arg = os.path.join(arg, zips[0])
@@ -117,7 +121,7 @@ def resolve_input(arg):
             raise SystemExit(f"no csv in {arg}")
         n = sorted(names, key=len)[0]
         return (lambda: io.TextIOWrapper(zipfile.ZipFile(arg).open(n), encoding="utf-8-sig", newline=None)), arg + ":" + n
-    return (lambda: open(arg, "r", newline=None, encoding="utf-8-sig")), arg
+    return (lambda: open(arg, "r", newline=None, encoding="utf-8-sig", errors="replace")), arg
 
 
 def parse_ts(tok):
@@ -217,7 +221,7 @@ def ingest(opener, info):
     bg, ba = [], []
     w_idx = npres = 0
     last_t = last = p1 = p2 = None
-    t_last_valid = t = 0.0
+    t_last_valid = t_acc = 0.0
     st = dict(rows=0, nan=0, dead=0, frozen=0, spikes=0, valid=0)
     buf = []
     sig_g, sig_a = 0.01, 0.1
@@ -264,6 +268,10 @@ def ingest(opener, info):
             st["rows"] += 1
             t = (ti - t0i) * tsc if (ti is not None and t0i is not None) else \
                 ((ti if ti is not None else tf) - (t0i if t0i is not None else t0f)) * tsc
+            if t < 0.0 or t > t_last_valid + 60.0 or (last_t is not None and t < last_t):
+                st["nan"] += 1  # out-of-order or glitched timestamp: still gets a pose, not used for estimation
+                continue
+            t_acc = t
             while t >= w_idx + 1.0:  # close the per-second window
                 sg.append(_mad_sigma(bg)); sa.append(_mad_sigma(ba)); present.append(min(npres, 65535))
                 if sg[-1] > 0:
@@ -317,7 +325,7 @@ def ingest(opener, info):
     nb = int(t_last_valid / bdt) + 1
     while len(cnt) < nb:
         gsum.extend((0.0, 0.0, 0.0)); asum.extend((0.0, 0.0, 0.0)); cnt.append(0)
-    return dict(sg=sg, sa=sa, present=present, T_L=t_last_valid, t_end=t, gsum=gsum, asum=asum, cnt=cnt,
+    return dict(sg=sg, sa=sa, present=present, T_L=t_last_valid, t_end=t_acc, gsum=gsum, asum=asum, cnt=cnt,
                 nb=nb, ws=ws, nwin=len(ws) // 13, stats=st)
 
 
@@ -355,8 +363,7 @@ def fit_severity(present, dt_nom, T_L, T_end):
     if len(pts) < 5:
         return 0.0, 1.7
 
-    def miss(sv):
-        return 0.06 * sv + 0.0015 * sv * (5.0 + 22.5 * sv)
+    # expected missing fraction miss(s) = 0.06 s + 0.0015 s (5 + 22.5 s) = 0.0675 s + 0.03375 s^2
     best = (1e30, 0.0, 1.7)
 
     def fit_L(g):
@@ -497,7 +504,6 @@ def m3sym(A):
     return tuple(tuple(0.5 * (A[i][j] + A[j][i]) for j in range(3)) for i in range(3))
 
 
-I3 = ((1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0))
 Z3 = ((0.0, 0.0, 0.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))
 
 
@@ -628,7 +634,7 @@ class Att:
         self.C = tuple(tuple(full[r][3:6]) for r in range(3, 6))
 
 
-def initial_attitude(gsum, asum, cnt, nb, sg):
+def initial_attitude(gsum, asum, cnt, nb):
     """Gravity direction (roll, pitch; yaw = 0) and gyro bias from the calmest early second."""
     bdt = P["bin_dt"]
     per = max(1, int(round(1.0 / bdt)))
@@ -663,9 +669,8 @@ def initial_attitude(gsum, asum, cnt, nb, sg):
     still = bestv < 2.5e-3 * 0.25 and abs(g - 9.81) < 0.5  # bin-mean variance is ~4x lower than per-sample
     bg0 = tuple(wm) if still else (0.0, 0.0, 0.0)
     u = [x / g for x in am]
-    # rotation taking body "up" u to world z
-    ax, ay, az = u[1] * 1.0 - u[2] * 0.0, u[2] * 0.0 - u[0] * 1.0, 0.0
-    ax, ay, az = u[1], -u[0], 0.0
+    # rotation taking body "up" u to world z: axis u x z = (u_y, -u_x, 0), angle atan2(|u x z|, u.z)
+    ax, ay = u[1], -u[0]
     s = math.sqrt(ax * ax + ay * ay)
     cth = u[2]
     if s < 1e-9:
@@ -683,7 +688,8 @@ def initial_attitude(gsum, asum, cnt, nb, sg):
 
 
 def attitude(gsum, asum, cnt, nb, T_L, gmag):
-    """Forward + backward ESKF over bins; returns smoothed quaternion at every bin boundary (nb+1)."""
+    """Forward ESKF + error-state RTS smoother over bins; returns the smoothed quaternion at every bin
+    boundary (nb + 1 entries) and the gyro bias at the end of the forward pass."""
     bdt = P["bin_dt"]
     every = max(1, int(P["tilt_every"]))
     dt_nom = INFO["dt_nom"]
@@ -1252,7 +1258,7 @@ def run(inp, out_path, hook=None):
     JAM.update(L=L, gamma=gam, T=max(T_end, 1e-9), sg=smooth_levels(sg, T_L), sa=smooth_levels(d["sa"], T_L))
     gsum, asum, cnt, nb, ws, nwin = d["gsum"], d["asum"], d["cnt"], d["nb"], d["ws"], d["nwin"]
     del d
-    INIT = initial_attitude(gsum, asum, cnt, nb, sg)
+    INIT = initial_attitude(gsum, asum, cnt, nb)
     gmag = INIT[2]
     STILL = still_windows(ws, nwin, gmag) if P["still"] else None
     del ws
