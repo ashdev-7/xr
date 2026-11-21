@@ -102,3 +102,31 @@ Result (seed 42, aware/asis), untuned drag_sig 1.2:
 | MH_02 aware/asis | 4.357 / 4.595 | 3.807 / 3.942 | 4.665 |
 | V1_02 aware/asis | 1.283 / 1.314 | 1.175 / 1.187 | 1.778 |
 Mean ATE 3.325 -> 2.843; BLIND 4.043 -> 3.504 (V1_02 blind worse: 1.03 -> 1.35, to investigate).
+
+## 2026-11-21 — rotorcraft blind window (kept: hold for rotorcraft)
+GT: EuRoC flights decelerate/land at the end (speed at failure 0.17-0.72 m/s, mean in the blind window
+0.12-0.23 m/s; z drops 0.3-0.4 m). With drag on, 4 EuRoC flights x 2 scen: BLIND smoother forecast 3.342,
+hold 3.227, decaying velocity 0.5 s 3.385. Rotorcraft preset: blind_tau = 0 (hold).
+
+## 2026-11-21 — rotorcraft position prior probe (aware, MH_01-03 + V1_02)
+sig_p_h 3 -> 10: ATE 2.738 -> 2.594 (BLIND 3.251 -> 3.149). Weaker still (10 + sig_c 0.5, 30 + sig_c 1):
+BLIND 4.2-4.7 (end-of-flight drift goes into the held position). Tighter drag (drag_sig 0.8): worse (3.378).
+Diagnosis (MH_01): estimated excursion ~3 m vs true ~10 m: the workspace prior shrinks the trajectory.
+
+## 2026-11-21 — drag error spectrum and Gauss-Markov drag-error state (rejected)
+Drag-velocity residual vs GT (airborne, 10 Hz): white ~0.5-0.65 m/s; after 5 s averaging 0.12-0.30 m/s
+(2-3x the white expectation) -> correlated component; mean offset 0.1-0.2 m/s.
+5-state KF/RTS with a Gauss-Markov drag error e (z = v + e + white), 5 EuRoC flights aware, sig_p_h 10:
+white-only 2.936; +GM (0.2 m/s, 5 s) 3.309; (0.2, 5 s, white 0.7) 3.227; (0.3, 10 s, white 0.7) 3.461.
+Rejected: the long-term mean of the drag velocity is exactly the information that tracks slow excursions;
+a correlated-error state explains it away. Also 1.5-2x slower.
+
+## 2026-11-21 — scenario-correct bias random walks (rejected, small)
+In `asis` the gyro gets the accel-sized bias RW (0.01 s) and the accel the gyro-sized one (0.0006 s).
+Oracle with correct values, 5 EuRoC flights asis: 3.290 -> 3.239 with bg_k 0.01 (-1.5 %); ba_k 0.001 hurts
+(3.436): the accel-bias state also absorbs tilt and other slow errors. Not worth a scenario detector.
+
+## 2026-11-21 — handheld class tuning (kept)
+Coordinate descent on TUM-VI room1/3/5 (2 scen x seeds 42, 1): J_train 0.5879 -> 0.5644
+(sig_v_h 0.7 -> 1.96, ba_k 0.01 -> 0.028, tilt_sig 0.5 -> 0.25). Held-out TUM room2/4/6 (2 scen x 3 seeds):
+J_test 0.6788 -> 0.6738, ATE 0.551 -> 0.532, BLIND 0.602 -> 0.611.

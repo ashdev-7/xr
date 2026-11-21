@@ -75,7 +75,8 @@ P = dict(
 # the class unambiguous: median accel noise 0.5-1.0 m/s^2 on EuRoC MAV, ~0.03 on handheld TUM-VI.
 PRESETS = {
     1: dict(sig_v_h=1.0, sig_p_h=3.0, sig_a=0.1, ba_rw=0.01, bg0_sig=0.005, blind_tau=0.0),   # rotorcraft
-    0: dict(sig_v_h=0.7, sig_p_h=1.5, sig_a=0.1, ba_rw=0.02, sig_c=0.1, bg0_sig=0.005),  # handheld
+    0: dict(sig_v_h=1.96, sig_p_h=1.5, sig_a=0.1, ba_rw=0.02, ba_k=0.028, sig_c=0.1, tilt_sig=0.25,
+            bg0_sig=0.005),  # handheld (tuned on TUM-VI room1/3/5; TEST room2/4/6 J 0.679 -> 0.674)
 }
 CLI_SET = set()  # parameters given on the command line override the presets
 

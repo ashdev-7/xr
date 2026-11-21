@@ -122,7 +122,7 @@ def run(method="pg", params=(), flights=None, scen=("asis", "aware"), seeds=(42,
     # snapshot the estimator so that editing src/main.py during a long run cannot mix versions
     import shutil
     main_py = os.path.join(outdir, "_main_snapshot.py")
-    shutil.copy(os.path.join(ROOT, "src", "main.py"), main_py)
+    shutil.copy(os.environ.get("PATHGUARD_MAIN") or os.path.join(ROOT, "src", "main.py"), main_py)
     jobs = [(method, fl, sc, sd, d, list(params), outdir, main_py) for fl, sc, sd, d in variants(flights, scen, seeds)]
     with ProcessPoolExecutor(workers) as ex:
         res = list(ex.map(job, jobs))

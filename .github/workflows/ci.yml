@@ -1,0 +1,33 @@
+# Builds the Docker image and checks the output contract on every push (no local Docker needed).
+name: ci
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.8", "3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: unit tests (stdlib only)
+        run: python -I tests/test_eskf.py
+      - name: output contract on the sample flight
+        run: python -I tests/test_contract.py sample/imu0/data.csv
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build image
+        run: docker build -t pathguard src/
+      - name: run on the sample flight
+        run: |
+          docker run --rm -v "$PWD/sample:/data" pathguard /data/imu0/data.csv /data/estimated_trajectory.txt
+          python3 - <<'PY'
+          n_in = sum(1 for l in open("sample/imu0/data.csv") if l[:1].isdigit())
+          n_out = sum(1 for l in open("sample/estimated_trajectory.txt") if l.strip() and not l.startswith("#"))
+          print("rows in", n_in, "poses out", n_out)
+          assert n_in == n_out
+          PY
