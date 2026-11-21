@@ -59,9 +59,25 @@ P = dict(
     zupt_sig=0.02,      # zero-velocity pseudo-measurement noise [m/s]
     zaru_sig=0.002,     # zero-angular-rate measurement noise floor [rad/s]
     still_tilt=0.02,    # gravity-direction noise while still [rad]
+    # rotor drag (rotorcraft only): the body-horizontal specific force of a multirotor is -mu * v_body
+    drag=1,             # use the rotor-drag velocity measurement when the platform is a rotorcraft
+    drag_mu=0.18,       # linear drag coefficient [1/s] (fitted on TRAIN flights: 0.18-0.20)
+    drag_sig=1.2,       # velocity noise of one 10 Hz drag measurement [m/s]
+    drag_vib=0.4,       # rotors spinning and airborne when accel vibration exceeds this [m/s^2]
+    # platform: -1 auto (rotor vibration signature), 0 handheld/ground, 1 rotorcraft
+    platform=-1,
+    vib_thr=0.15,       # median accel white noise [m/s^2] above which the platform is a rotorcraft
     # features
     backward=1, adapt=1, repair=1, still=1, verbose=0,
 )
+
+# Motion priors learned per platform class on TRAIN flights (tools/bench/tune.py). Rotor vibration makes
+# the class unambiguous: median accel noise 0.5-1.0 m/s^2 on EuRoC MAV, ~0.03 on handheld TUM-VI.
+PRESETS = {
+    1: dict(sig_v_h=1.0, sig_p_h=3.0, sig_a=0.1, ba_rw=0.01, bg0_sig=0.005),   # rotorcraft
+    0: dict(sig_v_h=0.7, sig_p_h=1.5, sig_a=0.1, ba_rw=0.02, sig_c=0.1, bg0_sig=0.005),  # handheld
+}
+CLI_SET = set()  # parameters given on the command line override the presets
 
 
 def log(*a):
@@ -859,6 +875,7 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
     K = int(math.ceil(T_end / kdt)) + 2
     KL = int(T_L / kdt)  # knots fully covered by data are < KL
     kacc = array("d", bytes(8 * 3 * K))
+    kfb = array("d", bytes(8 * 3 * K))  # body-frame specific force (for the rotor-drag model)
     kcnt = array("H", bytes(2 * K))
     gz = 0.0; ng = 0
     # world-frame specific force per bin (mid-bin attitude) -> knot means
@@ -869,11 +886,13 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
         q0 = (qs[4 * b], qs[4 * b + 1], qs[4 * b + 2], qs[4 * b + 3])
         q1 = (qs[4 * b + 4], qs[4 * b + 5], qs[4 * b + 6], qs[4 * b + 7])
         qm = qnorm((q0[0] + q1[0], q0[1] + q1[1], q0[2] + q1[2], q0[3] + q1[3]))
-        fw = qrot(qm, (asum[3 * b] / c, asum[3 * b + 1] / c, asum[3 * b + 2] / c))
+        fb = (asum[3 * b] / c, asum[3 * b + 1] / c, asum[3 * b + 2] / c)
+        fw = qrot(qm, fb)
         j = b // per
         if j >= K:
             continue
         kacc[3 * j] += fw[0]; kacc[3 * j + 1] += fw[1]; kacc[3 * j + 2] += fw[2]
+        kfb[3 * j] += fb[0]; kfb[3 * j + 1] += fb[1]; kfb[3 * j + 2] += fb[2]
         kcnt[j] += 1
         gz += fw[2]; ng += 1
     gz = gz / ng if ng else 9.81
@@ -881,6 +900,7 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
         if kcnt[j]:
             c = kcnt[j]
             kacc[3 * j] /= c; kacc[3 * j + 1] /= c; kacc[3 * j + 2] = kacc[3 * j + 2] / c - gz
+            kfb[3 * j] /= c; kfb[3 * j + 1] /= c; kfb[3 * j + 2] /= c
     need = max(1, per // 3)
     adapt = P["adapt"]
     n_knot = max(1.0, kdt / INFO["dt_nom"])
@@ -915,6 +935,35 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
             k = int(j * kdt * 2.0)
             if 0 <= k < len(STILL) and STILL[k] and j * kdt <= T_L:
                 zk[j] = 1
+    # ---- rotor-drag velocity measurement (rotorcraft, rotors spinning, not at rest)
+    # A multirotor's thrust acts along one body axis u, so the specific force perpendicular to u is rotor
+    # drag: f_perp = -mu v_perp (Leishman et al. 2014). u = mean specific-force direction while airborne
+    # (this also absorbs a constant accelerometer bias). The body velocity is rotated to the world frame
+    # with the smoothed attitude and observed on the horizontal axes.
+    dvel = None
+    if PLATFORM == 1 and P["drag"]:
+        air = array("b", bytes(K))
+        su = [0.0, 0.0, 0.0]
+        for j in range(K):
+            if kcnt[j] >= need and j * kdt <= T_L and not zk[j] and sigma_a(j * kdt) > P["drag_vib"]:
+                air[j] = 1
+                su[0] += kfb[3 * j]; su[1] += kfb[3 * j + 1]; su[2] += kfb[3 * j + 2]
+        nu = math.sqrt(su[0] ** 2 + su[1] ** 2 + su[2] ** 2)
+        if nu > 0 and sum(air) * kdt > 5.0:
+            u = (su[0] / nu, su[1] / nu, su[2] / nu)
+            dvel = array("d", bytes(8 * 2 * K))
+            mu = P["drag_mu"]
+            for j in range(K):
+                if not air[j]:
+                    continue
+                f0, f1, f2 = kfb[3 * j], kfb[3 * j + 1], kfb[3 * j + 2]
+                fu = f0 * u[0] + f1 * u[1] + f2 * u[2]
+                vb = (-(f0 - fu * u[0]) / mu, -(f1 - fu * u[1]) / mu, -(f2 - fu * u[2]) / mu)
+                bm = min(nb, j * per + per // 2)
+                vw = qrot((qs[4 * bm], qs[4 * bm + 1], qs[4 * bm + 2], qs[4 * bm + 3]), vb)
+                dvel[2 * j] = vw[0]; dvel[2 * j + 1] = vw[1]
+            DIAG["drag_knots"] = sum(air); DIAG["thrust_axis"] = u
+    rd = P["drag_sig"] ** 2 * (0.1 / kdt)
     store = array("d", bytes(8 * 14 * K))  # filtered mean (4) + covariance upper triangle (10)
     for ax in range(3):
         horiz = ax < 2
@@ -959,6 +1008,16 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
             c00 -= k0 * p0; c01 -= k0 * p1; c02 -= k0 * p2; c03 -= k0 * p3
             c11 -= k1 * p1; c12 -= k1 * p2; c13 -= k1 * p3
             c22 -= k2 * p2; c23 -= k2 * p3; c33 -= k3 * p3
+            # rotor-drag velocity measurement v = v_drag (horizontal axes, airborne rotorcraft)
+            if dvel is not None and ax < 2 and air[j]:
+                S = c11 + rd
+                k0, k1, k2, k3 = c01 / S, c11 / S, c12 / S, c13 / S
+                inn = dvel[2 * j + ax] - x1
+                x0 += k0 * inn; x1 += k1 * inn; x2 += k2 * inn; x3 += k3 * inn
+                p0, p1, p2, p3 = c01, c11, c12, c13
+                c00 -= k0 * p0; c01 -= k0 * p1; c02 -= k0 * p2; c03 -= k0 * p3
+                c11 -= k1 * p1; c12 -= k1 * p2; c13 -= k1 * p3
+                c22 -= k2 * p2; c23 -= k2 * p3; c33 -= k3 * p3
             # pseudo-measurement p - c = 0 (variance rp)
             p0, p1, p2, p3 = c00 - c03, c01 - c13, c02 - c23, c03 - c33
             S = p0 - p3 + rp
@@ -1141,6 +1200,8 @@ INFO = {}
 INIT = None
 JAM = dict(L=0.0, gamma=1.7, T=1.0, sg=None, sa=None)
 STILL = None  # per 0.5 s window: 1 if the body is at rest
+PLATFORM = 0  # 1 rotorcraft, 0 handheld/ground
+DIAG = {}
 
 
 def sev_at(t):
@@ -1163,7 +1224,7 @@ def sigma_a(t):
 
 def run(inp, out_path, hook=None):
     """hook (development only): optional callable(stage, data) -> data, used by offline oracles."""
-    global INFO, INIT, STILL
+    global INFO, INIT, STILL, PLATFORM
     opener, src = resolve_input(inp)
     info = survey(opener)
     INFO = info
@@ -1172,6 +1233,14 @@ def run(inp, out_path, hook=None):
     if st["valid"] < 10:
         raise ValueError("fewer than 10 valid IMU rows")
     sg = d["sg"]
+    # platform class from the rotor-vibration signature (first half of the flight, before heavy jamming)
+    half = [x for i, x in enumerate(d["sa"]) if x > 0 and i < 0.5 * T_L]
+    vib = sorted(half)[len(half) // 2] if half else 0.0
+    plat = int(P["platform"]) if P["platform"] >= 0 else (1 if vib > P["vib_thr"] else 0)
+    PLATFORM = plat
+    for k, v in PRESETS[plat].items():
+        if k not in CLI_SET:
+            P[k] = v
     L, gam = fit_severity(d["present"], info["dt_nom"], T_L, T_end)
     JAM.update(L=L, gamma=gam, T=max(T_end, 1e-9), sg=smooth_levels(sg, T_L), sa=smooth_levels(d["sa"], T_L))
     gsum, asum, cnt, nb, ws, nwin = d["gsum"], d["asum"], d["cnt"], d["nb"], d["ws"], d["nwin"]
@@ -1187,6 +1256,7 @@ def run(inp, out_path, hook=None):
     n_out = write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L)
     log(f"src={src} rows={st['rows']} out={n_out} dt={info['dt_nom']:.5f} gyro_first={info['gyro_first']} "
         f"ascale={info['ascale']:.3f} T_L={T_L:.2f}s bins={nb} knots={K}")
+    log(f"platform {'rotorcraft' if plat else 'handheld'} (accel vibration {vib:.3f} m/s^2) {DIAG}")
     log(f"integrity {st}  still windows: {sum(STILL) if STILL is not None else 0} x 0.5 s")
     i0, i1 = min(2, len(JAM["sg"]) - 1), min(max(0, int(T_L) - 1), len(JAM["sg"]) - 1)
     log(f"jamming L={L:.3f} gamma={gam:.3f} | white noise gyro {JAM['sg'][i0]:.4f}->{JAM['sg'][i1]:.4f} rad/s, "
@@ -1202,6 +1272,7 @@ def main(argv):
             k, v = a[2:].split("=", 1)
             if k not in P:
                 raise SystemExit(f"unknown parameter {k}")
+            CLI_SET.add(k)
             P[k] = type(P[k])(float(v)) if not isinstance(P[k], str) else v
         else:
             pos_args.append(a)

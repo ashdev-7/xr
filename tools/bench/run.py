@@ -89,11 +89,11 @@ def m_naive(d, out):
 
 
 def job(args):
-    method, fl, sc, sd, d, params, outdir = args
+    method, fl, sc, sd, d, params, outdir, main_py = args
     out = os.path.join(outdir, f"{fl}__{sc}_s{sd}.txt")
     t0 = time.perf_counter()
     if method == "pg":
-        r = subprocess.run([PY, "-I", os.path.join(ROOT, "src", "main.py"), d, out, *params], capture_output=True, text=True)
+        r = subprocess.run([PY, "-I", main_py, d, out, *params], capture_output=True, text=True)
         if r.returncode:
             return dict(flight=fl, scen=sc, seed=sd, error=r.stderr[-2000:])
     elif method == "cpp":
@@ -119,7 +119,11 @@ def job(args):
 def run(method="pg", params=(), flights=None, scen=("asis", "aware"), seeds=(42,), tag=None, quiet=False, workers=10):
     outdir = os.path.join(ROOT, "results", tag or method)
     os.makedirs(outdir, exist_ok=True)
-    jobs = [(method, fl, sc, sd, d, list(params), outdir) for fl, sc, sd, d in variants(flights, scen, seeds)]
+    # snapshot the estimator so that editing src/main.py during a long run cannot mix versions
+    import shutil
+    main_py = os.path.join(outdir, "_main_snapshot.py")
+    shutil.copy(os.path.join(ROOT, "src", "main.py"), main_py)
+    jobs = [(method, fl, sc, sd, d, list(params), outdir, main_py) for fl, sc, sd, d in variants(flights, scen, seeds)]
     with ProcessPoolExecutor(workers) as ex:
         res = list(ex.map(job, jobs))
     errs = [r for r in res if "error" in r]

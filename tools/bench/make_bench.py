@@ -56,6 +56,7 @@ def write_gt(kind, gt_path, out_path):
 
 
 LEVEL = None  # None = official default max_level
+DEBIAS = False  # oracle: remove the ground-truth sensor biases (EuRoC) before degradation
 
 
 def run_official(df, seed):
@@ -82,6 +83,10 @@ def build(flight, kind, imu_path, gt_path, seeds, scenarios):
     raw = pd.read_csv(imu_path, header=header)
     assert raw.shape[1] == 7, raw.shape
     cols = list(raw.columns)  # t, w xyz, a xyz (EuRoC order)
+    if DEBIAS:
+        g = np.loadtxt(gt_path, delimiter=",", comments="#")
+        raw[cols[1:4]] = raw[cols[1:4]].to_numpy() - g[:, 11:14].mean(0)
+        raw[cols[4:7]] = raw[cols[4:7]].to_numpy() - g[:, 14:17].mean(0)
     dt_nom = float(np.median(np.diff(raw[cols[0]].to_numpy(np.int64)))) * 1e-9
     for sc in scenarios:
         for seed in seeds:
@@ -91,7 +96,7 @@ def build(flight, kind, imu_path, gt_path, seeds, scenarios):
                 re = raw[[cols[0]] + cols[4:7] + cols[1:4]]
                 out, stats = run_official(re, seed)
                 out = out[cols]
-            vd = os.path.join(od, f"{sc}{'' if LEVEL is None else '_L%g' % LEVEL}_s{seed}")
+            vd = os.path.join(od, f"{sc}{'' if LEVEL is None else '_L%g' % LEVEL}{'_nob' if DEBIAS else ''}_s{seed}")
             os.makedirs(os.path.join(vd, "imu0"), exist_ok=True)
             out.to_csv(os.path.join(vd, "imu0", "data.csv"), index=False, header=True)
             ts = out[cols[0]].to_numpy(np.int64)
@@ -112,9 +117,11 @@ if __name__ == "__main__":
     ap.add_argument("--seeds", default=",".join(map(str, SEEDS)))
     ap.add_argument("--scenarios", default="asis,aware")
     ap.add_argument("--level", type=float, default=None, help="override max_level (oracle/stress variants)")
+    ap.add_argument("--debias", action="store_true", help="oracle: subtract GT sensor biases first (EuRoC)")
     ap.add_argument("flights", nargs="*")
     a = ap.parse_args()
     LEVEL = a.level
+    DEBIAS = a.debias
     fl = load_flights()
     for name, (kind, imu, gt) in fl.items():
         if a.flights and name not in a.flights:
