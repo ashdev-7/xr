@@ -1,7 +1,7 @@
 # PathGuard stage file: translation: per-axis Kalman filter + RTS smoother on 10 Hz knots.
-# Executed by main.py into main.py's own namespace (see _load_stages there), not imported as a module:
+# Embedded verbatim into the standalone src/main.py by tools/build_main.py and executed there, in main.py's namespace:
 # it uses the imports (math, array, os, sys), parameters P and helpers defined in main.py.
-# Do not run directly.
+# Edit here, then run: python tools/build_main.py   (tests/test_build.py checks main.py is up to date).
 
 def chol_solve6(A, B, C, d):
     """Solve P y = d for the symmetric positive-definite 6x6 P = [[A, B], [B', C]] (Cholesky)."""

@@ -347,3 +347,11 @@ Largest single-stage parse 1.95 MB (3.13).
 Output bit-identical on the 7 reference inputs; contract 18/18. measure.py (fresh process, everything incl.
 loading the stages, median of 3): MH_02 4.11 ms/s, room2 4.45 ms/s (was ~5.8-6.2); worst-case traced peak
 2.99 / 2.78 MB. Floor for any pure-Python reader (parse the CSV twice + format the output): ~0.9 ms/s.
+
+## 2026-11-22 — correction: main.py must be standalone (FAQ: "submit a standalone Python script (main.py)")
+The stage-file split above would degrade to a stand-still trajectory if the evaluation copies only main.py.
+Replaced by tools/build_main.py: main.py is one standalone file carrying the five stages (src/stages/*.py) as
+embedded raw strings, compiled one at a time into its namespace. tests/test_build.py (also in CI) fails if main.py
+drifts from the stages. Bit-identical on the 7 reference inputs; main.py alone in another folder, Python 3.10, -I:
+bit-identical. Worst-case traced peak 2.96 / 3.23 MB (3.13), 2.30 / 2.26 MB (3.10); 3.9 ms per s of IMU.
+Bundle layout fixed to the template: estimated_trajectory.txt, metadata.json and src/ at the zip root.

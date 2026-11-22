@@ -1,7 +1,7 @@
 # PathGuard stage file: pass 2 (one pose per input row) and the pipeline driver run().
-# Executed by main.py into main.py's own namespace (see _load_stages there), not imported as a module:
+# Embedded verbatim into the standalone src/main.py by tools/build_main.py and executed there, in main.py's namespace:
 # it uses the imports (math, array, os, sys), parameters P and helpers defined in main.py.
-# Do not run directly.
+# Edit here, then run: python tools/build_main.py   (tests/test_build.py checks main.py is up to date).
 
 def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL=(0.0, 0.0, 0.0)):
     bdt = P["bin_dt"]

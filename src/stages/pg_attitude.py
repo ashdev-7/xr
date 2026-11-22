@@ -1,7 +1,7 @@
 # PathGuard stage file: initial attitude, attitude filter + RTS smoother.
-# Executed by main.py into main.py's own namespace (see _load_stages there), not imported as a module:
+# Embedded verbatim into the standalone src/main.py by tools/build_main.py and executed there, in main.py's namespace:
 # it uses the imports (math, array, os, sys), parameters P and helpers defined in main.py.
-# Do not run directly.
+# Edit here, then run: python tools/build_main.py   (tests/test_build.py checks main.py is up to date).
 
 def initial_attitude(gsum, asum, cnt, nb):
     """Gravity direction (roll, pitch; yaw = 0) and gyro bias from the calmest early second."""

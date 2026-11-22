@@ -81,7 +81,7 @@ imu0/data.csv
    and zero-angular-rate updates; the latter observes the gyro bias about gravity, i.e. heading drift.
 5. **Smoothing, not filtering.** The whole log is available offline; RTS smoothers carry information (for
    example a gyro bias learned late in the flight) back to the start and bridge dropouts from both sides.
-6. **Lean by construction.** Two streaming passes; memory grows with 40 ms bins and 10 Hz knots, not with rows. The code is compiled one stage file at a time, so even memory traced from interpreter start peaks at ~3 MB.
+6. **Lean by construction.** Two streaming passes; memory grows with 40 ms bins and 10 Hz knots, not with rows. `main.py` is one standalone file that compiles its embedded stages one at a time, so even memory traced from interpreter start peaks at ~3 MB.
 
 ## Evaluation protocol
 

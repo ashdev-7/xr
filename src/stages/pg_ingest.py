@@ -1,7 +1,7 @@
 # PathGuard stage file: pass 1: survey of the input and the single streaming pass (integrity, jamming meter, preintegration, rest statistics).
-# Executed by main.py into main.py's own namespace (see _load_stages there), not imported as a module:
+# Embedded verbatim into the standalone src/main.py by tools/build_main.py and executed there, in main.py's namespace:
 # it uses the imports (math, array, os, sys), parameters P and helpers defined in main.py.
-# Do not run directly.
+# Edit here, then run: python tools/build_main.py   (tests/test_build.py checks main.py is up to date).
 
 def survey(opener, nmax=4000):
     """Pre-read up to nmax data rows: header, column order, units, nominal sample period."""

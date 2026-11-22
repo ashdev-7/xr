@@ -1,15 +1,15 @@
 """Assemble the Track 03 submission bundle exactly as specified (organizer deck, slide 17):
 
-    <CollegeName_TeamName>.zip
-    └── <CollegeName_TeamName>/
-        ├── estimated_trajectory.txt   generated here from the evaluation IMU file
-        ├── metadata.json              measured runtime / memory / compute specs
-        └── src/
-            ├── main.py, pg_*.py      the estimator (entry point + stage files, stdlib only)
-            ├── README.md              how to run
-            └── Dockerfile
+    <CollegeName_TeamName>.zip          (files at the zip root, as in the template)
+    ├── estimated_trajectory.txt       generated here from the given IMU file
+    ├── metadata.json                  measured runtime / memory / compute specs, which input was used
+    └── src/
+        ├── main.py                    the estimator: standalone, Python standard library only
+        ├── stages/*.py                readable copies of the pipeline stages embedded in main.py
+        ├── README.md                  how to run
+        └── Dockerfile
 
-usage: python tools/make_bundle.py <CollegeName_TeamName> <evaluation imu0/data.csv | folder | zip>
+usage: python tools/make_bundle.py <CollegeName_TeamName> <imu0/data.csv | folder | zip> ["note on the input"]
 The output contract (one pose per row, exact timestamps, unit quaternions) is verified before zipping.
 """
 import json, os, platform, shutil, subprocess, sys, time, zipfile
@@ -18,13 +18,14 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 
-def main(team, imu):
+def main(team, imu, note=None):
     out = os.path.join(ROOT, "dist", team)
     shutil.rmtree(out, ignore_errors=True)
     os.makedirs(os.path.join(out, "src"))
-    import glob
-    for f in [os.path.basename(x) for x in glob.glob(os.path.join(ROOT, "src", "*.py"))] + ["Dockerfile", "README.md"]:
+    for f in ("main.py", "Dockerfile", "README.md"):
         shutil.copy(os.path.join(ROOT, "src", f), os.path.join(out, "src", f))
+    shutil.copytree(os.path.join(ROOT, "src", "stages"), os.path.join(out, "src", "stages"),
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     traj = os.path.join(out, "estimated_trajectory.txt")
     main_py = os.path.join(out, "src", "main.py")
     # run (timed, no profiler)
@@ -71,7 +72,7 @@ def main(team, imu):
                "+ per-axis Kalman/RTS translation smoother with per-platform motion prior, rest updates and "
                "rotor-drag velocity measurement (multirotors)",
         entrypoint="src/main.py (pure Python standard library)",
-        input=os.path.basename(src), input_rows=len(ns_in), output_poses=len(rows), imu_duration_s=round(dur, 3),
+        input=os.path.basename(src), input_note=note or "evaluation input", input_rows=len(ns_in), output_poses=len(rows), imu_duration_s=round(dur, 3),
         cpu_time_s=round(tm[0], 3), ms_per_s_of_imu=round(1000 * tm[0] / max(dur, 1e-9), 3),
         wall_time_s_including_interpreter_start=round(wall, 3),
         peak_heap_mb_estimator=round(heap / 2**20, 3), threads=1, network="none (offline)",
@@ -85,7 +86,7 @@ def main(team, imu):
                 if fn.endswith(".pyc"):
                     continue
                 p = os.path.join(dp, fn)
-                zf.write(p, os.path.relpath(p, os.path.join(ROOT, "dist")))
+                zf.write(p, os.path.relpath(p, out))
     print(json.dumps(meta, indent=1))
     print("bundle:", z)
     with zipfile.ZipFile(z) as zf:
@@ -94,6 +95,6 @@ def main(team, imu):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
+    if len(sys.argv) not in (3, 4):
         sys.exit(__doc__)
-    main(sys.argv[1], sys.argv[2])
+    main(*sys.argv[1:])

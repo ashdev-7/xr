@@ -12,6 +12,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: main.py is up to date with src/stages
+        run: python -I tests/test_build.py
       - name: unit tests (stdlib only)
         run: python -I tests/test_eskf.py
       - name: output contract on the sample flight
