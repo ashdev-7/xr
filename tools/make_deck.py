@@ -256,7 +256,8 @@ def main():
 
     # ---------------- 7 demo & setup
     s = S[6]
-    tb(s, 0.4, 1.05, 9.2, 0.35, [[("Repository  ", True, ACC), (a.repo, False, TXT, a.repo)]], size=12)
+    tb(s, 0.4, 1.05, 9.2, 0.35, [[("Repository  ", True, ACC), (a.repo, False, TXT, a.repo),
+                                 ("     Video  ", True, ACC), ("walkthrough (2:53)", False, TXT, "https://drive.google.com/file/d/1BfyC4fr7hpAaPWFslhgw5UITxz9V0isD/view?usp=sharing")]], size=12)
     cmds = ["# run (Python ≥ 3.8, nothing to install)",
             "python src/main.py <imu0/data.csv | dataset folder | .zip> estimated_trajectory.txt",
             "python src/main.py sample/imu0/data.csv out.txt --verbose=1     # platform, jamming, integrity log",
