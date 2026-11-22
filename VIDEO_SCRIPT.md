@@ -36,8 +36,9 @@ python tests/test_contract.py
 **1:55–2:35 · Results** (slide 5, then slide 8)
 > "We validated on real EuRoC and TUM-VI IMU data, degraded with the organizers' own script and
 > evaluated on flights held out while we built and tuned it. On drone flights PathGuard reaches 2.35 metres ATE,
-> against 3.20 for standing still and 18,645 for naive integration; on handheld data 0.52 against 1.10. With three 2-second signal losses added, the dropout error stays below standing still. Every component is
-> backed by an ablation, and ideas that did not help were removed and logged."
+> against 3.20 for standing still and 18,645 for naive integration; on handheld data 0.52 against 1.10. With three 2-second signal losses added, the dropout error stays below standing still. We attacked it
+> with 52 adversarial inputs, checked our scores against the organizers' own evo tool, and every component is
+> backed by an ablation."
 
 **2:35–2:50 · Close** (slide 6)
 > "Physics-first, measured at every step, and inside every budget. PathGuard. Thank you."
