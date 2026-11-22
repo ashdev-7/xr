@@ -390,3 +390,13 @@ scen): priors only z std 0.018 -> 0.155; + vertical bias RW 5e-4 (+0.01/severity
 corr 0.55, ATE 2.466 -> 2.454. Held-out (6 flights x 2 scen x 3 seeds): ATE 2.370 -> 2.350, pre-failure 2.359 ->
 2.337, dropout 2.334 -> 2.325, blind 2.228 -> 2.234, RPE 1 s 0.351 -> 0.307 m (-12.5 %), z corr 0.26 -> 0.57,
 alignment tilt 15.4 -> 11.4 deg. Adopted in the rotorcraft preset (ba_rw_z / ba_k_z are new parameters).
+
+## 2026-11-22 — unseen noise seeds (7, 2026; all 17 flights, both column scenarios) and blind-window risk
+Final code. Drone (44 runs): ATE 2.421 vs stand-still 3.448, pre-failure 2.410 vs 3.458, blind 2.295 vs 3.085,
+dropout 2.294 vs 3.414, RPE 1 s 0.298 vs 0.774. Handheld (24): ATE 0.459 vs 1.079, blind 0.608 vs 0.638, dropout
+0.483 vs 1.137, RPE 0.159 vs 0.833. Height: drone z corr 0.54, handheld 0.74.
+Per-run wins over stand-still: drone pre-failure 43/44, dropout 38/44, RPE 44/44, blind 27/44 (asis 11/22,
+aware 16/22); handheld pre-failure 24/24, dropout 24/24, RPE 24/24, blind 16/24 (margins small both ways).
+Drone error jumps in the last second before the failure (asis 2.05 -> 2.42 m, aware 1.48 -> 1.67 m).
+Rejected: hold the blind position from before the failure (TRAIN backtests + ends, 50 windows): blind 2.928 ->
+2.968 / 3.035 / 3.112 / 3.189 / 3.303 for 0.5 / 1 / 1.5 / 2 / 3 s; the last second still carries motion.
