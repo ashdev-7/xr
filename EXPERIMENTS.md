@@ -430,3 +430,6 @@ Accepted criticism -> flight-level statistics (tools/bench/stats.py, bootstrap o
 RPE and ATE better than stand-still on every flight in held-out (9/9), drones unseen seeds (11/11), rooms (6/6),
 CIs exclude 0; blind 5 s NOT significant on drones (held-out 4/9, CI [-1.31, +0.28]; unseen 6/11, CI [-1.66,
 +0.01]), small but significant on handheld (-0.03 m, CI [-0.05, -0.01]). Reported in the README.
+Correction to the entry above: the omitted bias-random-walk discretisation terms are 1.3-3.5 orders of magnitude
+below the white-noise terms, not 3-5 (attitude: q_b dt^3/3 ~ 8e-11 vs gyro 2e-9..3e-7 rad^2 per bin; translation
+velocity: q_b dt^3/3 ~ 1e-6 vs sig_a^2 dt^2 ~ 6e-5). Still negligible; not changed.
