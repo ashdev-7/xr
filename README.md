@@ -168,9 +168,11 @@ python tools/figures.py && python tools/make_deck.py --team ashdev7 --college ".
 ## Repository layout
 
 ```
-src/main.py                    the estimator (all of it), standard library only
+src/main.py                    the estimator (all of it, standalone), standard library only
+src/stages/                    readable source of the five pipeline stages embedded in main.py
+tools/build_main.py            regenerates main.py from src/stages (tests/test_build.py checks they match)
 src/Dockerfile, src/README.md  container and run instructions (shipped in the submission bundle)
-tests/                         output-contract suite (18 input variants), attitude-filter unit test
+tests/                         output-contract suite (18 input variants), attitude-filter unit test, build check
 tools/bench/                   benchmark builder, scorer, runner, tuner, oracles, report, measurement
 tools/data/                    range-request extractors for the public EuRoC / TUM-VI CSVs
 tools/degrade_imu_official.py  the organizers' degradation script, unmodified
