@@ -3,8 +3,9 @@ name: ci
 on: [push, pull_request, workflow_dispatch]
 jobs:
   contract:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04  # still ships Python 3.8 (ubuntu-latest no longer does)
     strategy:
+      fail-fast: false
       matrix:
         python: ["3.8", "3.10", "3.11", "3.12", "3.13"]
     steps:
