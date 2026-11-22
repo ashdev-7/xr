@@ -18,6 +18,24 @@ On real EuRoC and TUM-VI IMU data degraded by the organizers' own script, on fli
 | Handheld (3 TUM-VI rooms): ATE | **0.52 m** | 1.10 m | 644 m |
 | Runtime / memory | **~4–5 ms per 1 s of IMU / 1.6 MB estimator heap, ≤ 3.3 MB worst case (any log length)** | budget: 20 ms / 8 MB | |
 
+**Statistics with the flight as the unit** (seeds and column scenarios are averaged within a flight first; 95 %
+bootstrap CI over flights; `tools/bench/stats.py`). Noise seeds on the same flight are not independent samples.
+
+| PathGuard minus stand-still | held-out, 9 flights | drones, 11 flights, unseen seeds | handheld, 6 rooms, unseen seeds |
+|---|---|---|---|
+| pre-failure (waypoints) | −0.78 m [−1.46, −0.35], 9/9 better | −1.05 m [−1.74, −0.47], 11/11 | −0.64 m [−0.80, −0.47], 6/6 |
+| blind 5 s | −0.44 m [−1.31, +0.28], 4/9 better | −0.79 m [−1.66, +0.01], 6/11 | −0.03 m [−0.05, −0.01], 5/6 |
+| dropout | −0.80 m [−1.78, −0.17], 8/9 | −1.12 m [−2.00, −0.40], 11/11 | −0.65 m [−0.89, −0.42], 6/6 |
+| RPE 1 s | −0.49 m [−0.66, −0.33], 9/9 | −0.48 m [−0.64, −0.33], 11/11 | −0.68 m [−0.87, −0.48], 6/6 |
+
+The blind-window gain is not statistically established: it is our weakest result.
+
+**Which number is which.** Headline numbers: held-out flights, seeds 42/1/2, final code. The drone preset was
+chosen on the 5 TRAIN flights only; the held-out flights confirmed each accepted change once. One handheld
+parameter (`sig_a`) was refit on all six rooms at the end; with its pre-refit value the strictly held-out handheld
+ATE is 0.524 m (0.516 m after the refit). "Unseen seeds" are new noise realisations (7, 2026) on all public
+flights, i.e. robustness to noise, not new trajectories.
+
 ![Top view vs ground truth](figures/top_view.png)
 
 ## Quick start
@@ -152,8 +170,9 @@ imu0/data.csv
 - **Heading is only weakly observable** without rest periods (the gyro bias about gravity).
 - **Assumptions:** the degradation behaves like the official script (one severity ramp, short dropouts, zeroed
   rows after failure). Long dropouts would be bridged by the motion prior alone, which we did not tune for.
-- **Memory accounting:** the estimator's own data peaks at 1.7–1.9 MB. If the interpreter's compilation of
-  `main.py` (a fixed, transient cost before any data is read) is traced too, the peak is 7.8 MB.
+- **Memory accounting:** the estimator's own data peaks at 1.3–1.7 MB. Traced from interpreter start, including
+  parsing the code, the peak is ~3 MB (main.py compiles its embedded stages one at a time), and it stays ~3.3 MB
+  for logs of any length (longer than 5 min logs get coarser bins and knots, at some accuracy cost).
 
 ## Reproducing everything
 

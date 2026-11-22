@@ -29,6 +29,7 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL=(0.0,
     tau = P["blind_tau"]
     pL, vL = hermite(T_L)
     atau = P["att_tau"]
+    t_att0 = max(T_L, nbo * bdt)
     buf = []
     with open(out_path, "w", newline="\n") as fo:
         fo.write("# timestamp tx ty tz qx qy qz qw\n")
@@ -75,8 +76,8 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL=(0.0,
                 if i >= nbo:
                     # blind window: continue the last body rate, decaying with time constant att_tau
                     qw, qx, qy, qz = qs[4 * nbo], qs[4 * nbo + 1], qs[4 * nbo + 2], qs[4 * nbo + 3]
-                    if atau > 0 and t > T_L:
-                        fa = atau * (1.0 - math.exp(-(t - T_L) / atau))
+                    if atau > 0 and t > t_att0:  # decay starts where the smoothed bins end: continuous
+                        fa = atau * (1.0 - math.exp(-(t - t_att0) / atau))
                         qw, qx, qy, qz = qmul((qw, qx, qy, qz), qexp(wL[0] * fa, wL[1] * fa, wL[2] * fa))
                 else:
                     a0, a1, a2, a3 = qs[4 * i], qs[4 * i + 1], qs[4 * i + 2], qs[4 * i + 3]
@@ -94,6 +95,8 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL=(0.0,
                     buf.append("%s %.6f %.6f %.6f %.9f %.9f %.9f %.9f\n" % (ts_s, pL[0] + f_ * vL[0], pL[1] + f_ * vL[1],
                                                                           pL[2] + f_ * vL[2], qx, qy, qz, qw))
                     n_out += 1
+                    if len(buf) >= 2048:  # flush here too: a long dead tail must not accumulate in memory
+                        fo.write(_no_negative_zero("".join(buf))); buf = []
                     continue
                 # position: cubic Hermite between knots
                 uk = t / kdt

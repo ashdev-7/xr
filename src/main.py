@@ -1214,6 +1214,7 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL=(0.0,
     tau = P["blind_tau"]
     pL, vL = hermite(T_L)
     atau = P["att_tau"]
+    t_att0 = max(T_L, nbo * bdt)
     buf = []
     with open(out_path, "w", newline="\n") as fo:
         fo.write("# timestamp tx ty tz qx qy qz qw\n")
@@ -1260,8 +1261,8 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL=(0.0,
                 if i >= nbo:
                     # blind window: continue the last body rate, decaying with time constant att_tau
                     qw, qx, qy, qz = qs[4 * nbo], qs[4 * nbo + 1], qs[4 * nbo + 2], qs[4 * nbo + 3]
-                    if atau > 0 and t > T_L:
-                        fa = atau * (1.0 - math.exp(-(t - T_L) / atau))
+                    if atau > 0 and t > t_att0:  # decay starts where the smoothed bins end: continuous
+                        fa = atau * (1.0 - math.exp(-(t - t_att0) / atau))
                         qw, qx, qy, qz = qmul((qw, qx, qy, qz), qexp(wL[0] * fa, wL[1] * fa, wL[2] * fa))
                 else:
                     a0, a1, a2, a3 = qs[4 * i], qs[4 * i + 1], qs[4 * i + 2], qs[4 * i + 3]
@@ -1279,6 +1280,8 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL=(0.0,
                     buf.append("%s %.6f %.6f %.6f %.9f %.9f %.9f %.9f\n" % (ts_s, pL[0] + f_ * vL[0], pL[1] + f_ * vL[1],
                                                                           pL[2] + f_ * vL[2], qx, qy, qz, qw))
                     n_out += 1
+                    if len(buf) >= 2048:  # flush here too: a long dead tail must not accumulate in memory
+                        fo.write(_no_negative_zero("".join(buf))); buf = []
                     continue
                 # position: cubic Hermite between knots
                 uk = t / kdt
@@ -1422,24 +1425,51 @@ except Exception as _e:  # noqa: BLE001  (any failure -> stand-still output, nev
 # ----------------------------------------------------------------------------- END EMBEDDED STAGES
 
 
+def parse_args(argv):
+    """Positional [input] [output], or --input/-i and --output/-o (with a space or '='), plus --param=value.
+    Unknown flags are reported and ignored: an evaluation harness must never be stopped by an argument."""
+    inp = out = None
+    pos_args, params = [], []
+    a = list(argv[1:])
+    while a:
+        x = a.pop(0)
+        if x in ("--input", "-i", "--output", "-o") and a:
+            v = a.pop(0)
+            if x in ("--input", "-i"):
+                inp = v
+            else:
+                out = v
+        elif x.startswith("--") and "=" in x:
+            k, v = x[2:].split("=", 1)
+            if k == "input":
+                inp = v
+            elif k == "output":
+                out = v
+            else:
+                params.append((k, v))
+        elif x.startswith("-") and len(x) > 1:
+            print(f"pathguard: ignoring unknown option {x}", file=sys.stderr)
+        else:
+            pos_args.append(x)
+    if inp is None and pos_args:
+        inp = pos_args.pop(0)
+    if out is None and pos_args:
+        out = pos_args.pop(0)
+    return inp, out or "estimated_trajectory.txt", params
+
+
 def main(argv):
+    inp, out, params = parse_args(argv)
     if LOAD_ERROR is not None:
         print(f"pathguard: cannot load the estimator ({LOAD_ERROR}); writing a stand-still trajectory", file=sys.stderr)
-        pos = [a for a in argv[1:] if not (a.startswith("--") and "=" in a)]
-        fallback(pos[0] if pos else None, pos[1] if len(pos) > 1 else "estimated_trajectory.txt")
+        fallback(inp, out)
         return
-    pos_args = []
-    for a in argv[1:]:
-        if a.startswith("--") and "=" in a:
-            k, v = a[2:].split("=", 1)
-            if k not in P:
-                raise SystemExit(f"unknown parameter {k}")
-            CLI_SET.add(k)
-            P[k] = type(P[k])(float(v)) if not isinstance(P[k], str) else v
-        else:
-            pos_args.append(a)
-    inp = pos_args[0] if pos_args else None
-    out = pos_args[1] if len(pos_args) > 1 else "estimated_trajectory.txt"
+    for k, v in params:
+        if k not in P:
+            print(f"pathguard: ignoring unknown parameter {k}", file=sys.stderr)
+            continue
+        CLI_SET.add(k)
+        P[k] = type(P[k])(float(v)) if not isinstance(P[k], str) else v
     try:
         run(inp, out)
     except Exception as e:  # never leave the evaluator without a well-formed trajectory

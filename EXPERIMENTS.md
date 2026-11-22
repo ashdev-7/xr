@@ -413,3 +413,20 @@ res_T = 300 s get bins and knots coarsened by length/300. <= 5 min (all EuRoC fl
 After: 30 min 3.23 MB, 60 min 3.30 MB, 3.4-3.6 ms/s. Cost measured by forcing the coarsening on held-out flights
 (9 flights x 2 scen): ATE 1.713 -> 1.816 at 5x (a 25 min log), -> 2.517 at 12x (60 min). Kept res_T = 300 s
 (max traced peak ~4 MB at exactly 5 min) rather than spending the memory margin.
+
+## 2026-11-22 — external reviews (GPT, Gemini) triaged against code and measurements
+Confirmed and fixed: (1) stale README line claiming 7.8 MB traced peak (now ~3 MB); (2) CLI: "--input X --output Y"
+made "--input" the input path, "--output=Y" aborted -> parse_args accepts positional, --input/-i, --output/-o
+(space or '='), ignores unknown flags with a warning; (3) blind branch skipped the 2048-line output flush (memory
+on long dead tails); (4) blind attitude decay started at T_L although bins end at nbo*bdt (step of |w| x <= 0.04 s)
+-> starts at max(T_L, nbo*bdt). Positions bit-identical; attitude changed only in the 818 blind rows of MH_02.
+Measured, not a defect: float32 covariance storage + non-Joseph update "may break the RTS Cholesky" -> 0 failures
+in 262,526 smoother solves (all flights, seeds 42 and 7, incl. 2 s gaps).
+Negligible by magnitude (not changed): omitted dt^3/3, dt^2/2 bias-random-walk terms in the attitude and
+translation process noise (at 0.04 / 0.08 s steps they are 3-5 orders below the white-noise terms).
+Overstated: "final refit on all 17 flights" -> only handheld sig_a was refit (rotor refit rejected on an unseen
+seed). Strictly held-out handheld ATE with the pre-refit sig_a 0.1: 0.524 m (0.516 after refit).
+Accepted criticism -> flight-level statistics (tools/bench/stats.py, bootstrap over flights): pre-failure, dropout,
+RPE and ATE better than stand-still on every flight in held-out (9/9), drones unseen seeds (11/11), rooms (6/6),
+CIs exclude 0; blind 5 s NOT significant on drones (held-out 4/9, CI [-1.31, +0.28]; unseen 6/11, CI [-1.66,
++0.01]), small but significant on handheld (-0.03 m, CI [-0.05, -0.01]). Reported in the README.
