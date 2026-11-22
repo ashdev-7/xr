@@ -5,23 +5,25 @@ Team ashdev7 (Yash Tyagi), Thapar Institute of Engineering and Technology, Patia
 ## Tools used
 | Tool | Role |
 |---|---|
-| Claude Code (Anthropic, Claude Opus 5.5) | Coding and research assistant: implementation, experiments, literature review, documentation, figures, deck and bundle generation |
+| Claude Code (Anthropic, Claude Opus 5.5) | Engineering and research assistant: proposed design options, implemented the estimator and tools, ran the experiments, wrote the documentation, figures, deck and bundle generators |
 | ChatGPT (OpenAI) and Gemini (Google) | Independent reviewers of the finished submission (scoring against the rubric, code review). Their findings were checked against the code and measurements before any change; see the last entries of `EXPERIMENTS.md` |
 
-## How AI was used
-- **Implementation.** The estimator (`src/stages/*.py`, embedded in `src/main.py`), the benchmark and QA tools, and the
-  deck/bundle generators were written with Claude Code under the team's direction.
-- **Research.** Claude carried out the literature review (`docs/literature_review_full_text.md`); every source is
-  labelled full-text or abstract-only. Ideas from the literature were kept only if they improved held-out flights.
-- **Experiments.** Every design decision was made by measurement on real public EuRoC and TUM-VI data degraded with
-  the organizers' unmodified script, split by flight into TRAIN and TEST. Each change has a hypothesis, a metric and
-  a before/after in `EXPERIMENTS.md`, including the ideas that were rejected and the corrections to earlier claims.
+## How the work was divided
+**The team (Yash Tyagi) led and directed the project:**
+- Framed the problem and set the bar: win on architecture, design, accuracy and precision within the official
+  budgets (8 MB, 20 ms per second of IMU, Python, offline).
+- Set the rules of the work: the estimator never reads ground truth, no fingerprinting of evaluation sequences,
+  held-out validation by flight, measure before claiming, every result reproducible.
+- Steered the direction at each stage: questioned whether trajectory scale was handled correctly, required an
+  exhaustive full-text literature review (2017 onwards) before further changes, rejected deliverables that were not
+  of submission quality, required an adversarial QA audit, and commissioned independent reviews.
+- Reviewed results and deliverables and decided what was submitted.
 
-## What the team did
-- Set the objectives, constraints and acceptance standards (the official rubric and FAQ; no ground truth in the
-  estimator, no fingerprinting of evaluation sequences, held-out validation, measure before claiming).
-- Directed the work, reviewed results and deliverables, requested the independent reviews, and decided what was
-  submitted.
+**Claude worked under that direction:** it proposed candidate designs (for example the rotor-drag velocity
+measurement, the packet-loss jamming meter and the error-state smoothers), implemented them, and ran the
+experiments. Design decisions were taken on measured evidence: a component was kept only if it improved flights
+held out from tuning, and every decision, including rejected ideas and corrections to earlier claims, is logged in
+`EXPERIMENTS.md`.
 
 ## Integrity commitments
 - The estimator reads only the degraded IMU file. Ground truth is used only by the offline scorer and oracle
