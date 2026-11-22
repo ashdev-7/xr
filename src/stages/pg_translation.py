@@ -1,4 +1,4 @@
-# PathGuard stage file: translation: per-axis Kalman filter + RTS smoother on 10 Hz knots.
+# PathGuard stage file: translation: per-axis Kalman filter + RTS smoother on ~10 Hz knots (0.08 s).
 # Embedded verbatim into the standalone src/main.py by tools/build_main.py and executed there, in main.py's namespace:
 # it uses the imports (math, array, os, sys), parameters P and helpers defined in main.py.
 # Edit here, then run: python tools/build_main.py   (tests/test_build.py checks main.py is up to date).

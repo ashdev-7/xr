@@ -50,6 +50,10 @@ def survey(opener, nmax=4000):
                     n46.append(math.sqrt(v[3] * v[3] + v[4] * v[4] + v[5] * v[5]))
             if rows >= nmax:
                 break
+        # count the remaining lines (no parsing): the log length sets the time resolution (see run)
+        more = 0
+        for line in f:
+            more += 1
     if rows < 3:
         raise ValueError("input has fewer than 3 IMU rows")
     # timestamp unit -> seconds (same rule as the official degradation script)
@@ -93,7 +97,8 @@ def survey(opener, nmax=4000):
         gyro_first = gs(med(n46)) <= gs(med(n13))
     ma = med(n46) if gyro_first else med(n13)
     return dict(header=header, tscale=tscale, dt_nom=dt_nom, gyro_first=gyro_first,
-                ascale=9.80665 if 0.5 < ma < 2.0 else 1.0, is_int=is_int, first_ts=first_ts, first_tsf=first_tsf)
+                ascale=9.80665 if 0.5 < ma < 2.0 else 1.0, is_int=is_int, first_ts=first_ts, first_tsf=first_tsf,
+                dur_est=(rows + more) * dt_nom)
 
 
 # ----------------------------------------------------------------------------- pass 1b: one-pass ingest

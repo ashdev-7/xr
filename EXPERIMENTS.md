@@ -400,3 +400,16 @@ aware 16/22); handheld pre-failure 24/24, dropout 24/24, RPE 24/24, blind 16/24 
 Drone error jumps in the last second before the failure (asis 2.05 -> 2.42 m, aware 1.48 -> 1.67 m).
 Rejected: hold the blind position from before the failure (TRAIN backtests + ends, 50 windows): blind 2.928 ->
 2.968 / 3.035 / 3.112 / 3.189 / 3.303 for 0.5 / 1 / 1.5 / 2 / 3 s; the last second still carries motion.
+
+## 2026-11-22 — adversarial QA final run + bounded memory for long logs (kept)
+Final break_it run (52 cases, fresh process each, memory traced from interpreter start): all pass the contract.
+Fixed cases now normal: 400 Hz handheld 0.342 (was 1.216), ambiguous header 0.345 / 3.813 (was 5.825 / 4.663),
+corrupted first timestamp 0.344 / 3.809 (was stand-still), tab and semicolon delimiters read. Mount rotation incl.
+upside-down: identical ATE. Runtime 3.3-8.7 ms per s of IMU on every case. Remaining: linearly interpolated 400 Hz
+DRONE data 4.56 m (interpolation halves rotor vibration on inserted samples; real 400 Hz data does not do this).
+Long logs exposed memory growing with duration: 30 min 12.9 MB, 60 min 24.3 MB (0.38 MB/min; > 8 MB beyond ~16 min).
+Fix: survey counts the lines (log length = lines x dt, robust to a corrupted last timestamp); logs longer than
+res_T = 300 s get bins and knots coarsened by length/300. <= 5 min (all EuRoC flights, TUM-VI rooms): bit-identical.
+After: 30 min 3.23 MB, 60 min 3.30 MB, 3.4-3.6 ms/s. Cost measured by forcing the coarsening on held-out flights
+(9 flights x 2 scen): ATE 1.713 -> 1.816 at 5x (a 25 min log), -> 2.517 at 12x (60 min). Kept res_T = 300 s
+(max traced peak ~4 MB at exactly 5 min) rather than spending the memory margin.

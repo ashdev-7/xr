@@ -32,7 +32,8 @@ from array import array
 # ----------------------------------------------------------------------------- parameters
 P = dict(
     bin_dt=0.04,        # attitude/preintegration bin [s] (25 Hz: -24 % runtime, -28 % heap for ~0.3 % ATE)
-    knot_dt=0.1,        # translation smoother step [s]
+    knot_dt=0.1,        # translation smoother step [s] (rounded to whole bins: 0.08 s with 0.04 s bins)
+    res_T=300.0,        # logs longer than this [s] get proportionally coarser bins/knots (bounded memory)
     # attitude
     tilt_sig=0.5,       # gravity-direction measurement noise per update [rad]
     tilt_k=4.0,         # extra tilt noise per | |f| - g | [rad per m/s^2]
@@ -202,6 +203,10 @@ def survey(opener, nmax=4000):
                     n46.append(math.sqrt(v[3] * v[3] + v[4] * v[4] + v[5] * v[5]))
             if rows >= nmax:
                 break
+        # count the remaining lines (no parsing): the log length sets the time resolution (see run)
+        more = 0
+        for line in f:
+            more += 1
     if rows < 3:
         raise ValueError("input has fewer than 3 IMU rows")
     # timestamp unit -> seconds (same rule as the official degradation script)
@@ -245,7 +250,8 @@ def survey(opener, nmax=4000):
         gyro_first = gs(med(n46)) <= gs(med(n13))
     ma = med(n46) if gyro_first else med(n13)
     return dict(header=header, tscale=tscale, dt_nom=dt_nom, gyro_first=gyro_first,
-                ascale=9.80665 if 0.5 < ma < 2.0 else 1.0, is_int=is_int, first_ts=first_ts, first_tsf=first_tsf)
+                ascale=9.80665 if 0.5 < ma < 2.0 else 1.0, is_int=is_int, first_ts=first_ts, first_tsf=first_tsf,
+                dur_est=(rows + more) * dt_nom)
 
 
 # ----------------------------------------------------------------------------- pass 1b: one-pass ingest
@@ -915,7 +921,7 @@ def attitude(gsum, asum, cnt, nb, T_L, gmag):
         out[4 * k] = qs[0]; out[4 * k + 1] = qs[1]; out[4 * k + 2] = qs[2]; out[4 * k + 3] = qs[3]
     return out, bg_end
 '''),
-    ('pg_translation', r'''# PathGuard stage file: translation: per-axis Kalman filter + RTS smoother on 10 Hz knots.
+    ('pg_translation', r'''# PathGuard stage file: translation: per-axis Kalman filter + RTS smoother on ~10 Hz knots (0.08 s).
 # Embedded verbatim into the standalone src/main.py by tools/build_main.py and executed there, in main.py's namespace:
 # it uses the imports (math, array, os, sys), parameters P and helpers defined in main.py.
 # Edit here, then run: python tools/build_main.py   (tests/test_build.py checks main.py is up to date).
@@ -1334,10 +1340,24 @@ def sigma_a(t):
 
 
 def run(inp, out_path, hook=None):
-    """hook (development only): optional callable(stage, data) -> data, used by offline oracles."""
-    global INFO, INIT, STILL, PLATFORM
+    """Bounded memory: arrays grow with the number of attitude bins and position knots. Up to res_T seconds of
+    log (all EuRoC flights and TUM-VI rooms) the nominal resolution is used; a longer log gets proportionally
+    coarser bins and knots, so the estimator's memory stays ~constant (~4 MB traced) for any log length."""
     opener, src = resolve_input(inp)
     info = survey(opener)
+    keep = (P["bin_dt"], P["knot_dt"])
+    if info["dur_est"] > P["res_T"]:
+        f = info["dur_est"] / P["res_T"]
+        P["bin_dt"], P["knot_dt"] = keep[0] * f, keep[1] * f
+    try:
+        return _run(opener, src, info, out_path, hook)
+    finally:
+        P["bin_dt"], P["knot_dt"] = keep
+
+
+def _run(opener, src, info, out_path, hook=None):
+    """hook (development only): optional callable(stage, data) -> data, used by offline oracles."""
+    global INFO, INIT, STILL, PLATFORM
     INFO = info
     d = ingest(opener, info)
     T_L, T_end, st = d["T_L"], max(d["t_end"], d["T_L"]), d["stats"]

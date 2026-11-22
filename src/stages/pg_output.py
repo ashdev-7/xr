@@ -155,10 +155,24 @@ def sigma_a(t):
 
 
 def run(inp, out_path, hook=None):
-    """hook (development only): optional callable(stage, data) -> data, used by offline oracles."""
-    global INFO, INIT, STILL, PLATFORM
+    """Bounded memory: arrays grow with the number of attitude bins and position knots. Up to res_T seconds of
+    log (all EuRoC flights and TUM-VI rooms) the nominal resolution is used; a longer log gets proportionally
+    coarser bins and knots, so the estimator's memory stays ~constant (~4 MB traced) for any log length."""
     opener, src = resolve_input(inp)
     info = survey(opener)
+    keep = (P["bin_dt"], P["knot_dt"])
+    if info["dur_est"] > P["res_T"]:
+        f = info["dur_est"] / P["res_T"]
+        P["bin_dt"], P["knot_dt"] = keep[0] * f, keep[1] * f
+    try:
+        return _run(opener, src, info, out_path, hook)
+    finally:
+        P["bin_dt"], P["knot_dt"] = keep
+
+
+def _run(opener, src, info, out_path, hook=None):
+    """hook (development only): optional callable(stage, data) -> data, used by offline oracles."""
+    global INFO, INIT, STILL, PLATFORM
     INFO = info
     d = ingest(opener, info)
     T_L, T_end, st = d["T_L"], max(d["t_end"], d["T_L"]), d["stats"]
