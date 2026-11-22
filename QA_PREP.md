@@ -14,7 +14,7 @@ per platform class.
 IMU-only navigation cannot see slow motion: a 0.01 m/s² bias becomes 0.5 m after 10 s and 50 m after
 100 s. The reference points are "stand still" (output a constant position) and naive double
 integration (thousands of metres on the same data). On the machine hall flights, 86 % of the true motion
-is in periods longer than 60 s. On six held-out drone flights we reach 2.37 m ATE vs 3.20 m standing still
+is in periods longer than 60 s. On six held-out drone flights we reach 2.35 m ATE vs 3.20 m standing still
 (naive integration: 18,645 m), mainly because the rotor-drag model turns the accelerometer into a velocity sensor.
 On handheld data: 0.52 m vs 1.10 m.
 
@@ -71,7 +71,7 @@ both sides of it.
 
 **12. Why pure Python without numpy?**
 The FAQ requires Python, and peak memory is 20 % of the score. Importing numpy alone costs ~7.4 MB of
-traced heap. Our estimator's data structures peak at 1.4–1.6 MB, and runtime is about 6 ms per second of IMU
+traced heap. Our estimator's data structures peak at 1.4–1.6 MB, and runtime is about 4–5 ms per second of IMU
 against a 20 ms budget (cold process, measured by tools/bench/report.py).
 
 **13. Why do you report ~2 MB and not the process memory?**
@@ -93,3 +93,23 @@ failure.
 The output is written by re-streaming the input rows, one line per row, including duplicates and dead
 rows, with timestamps converted by integer arithmetic. If anything fails, a stand-still trajectory with
 the same rows is written. 18 malformed-input variants are tested (`tests/test_contract.py`).
+
+**16. How did you test robustness?**
+An adversarial suite (`tools/qa/break_it.py`, 52 cases, fresh process each, memory traced from interpreter
+start): rotated or upside-down IMU mounting (identical ATE), clock offsets, 100/400 Hz, tab/semicolon delimiters,
+extra columns, scientific notation, swapped rows, corrupted first timestamp, clock jumps and resets, 10 s dead
+start, 10 s signal loss, non-UTF-8 headers, odd zips, empty/1-row/all-NaN files, and 30/60-minute logs. All
+produce a valid trajectory (one pose per row). The suite found and we fixed: a noise meter that collapsed on
+interpolated data, header names overriding physics for the column order, a corrupted first timestamp, delimiters,
+and memory growing with log length (60 min: 24 MB -> 3.3 MB, now bounded for any length).
+
+**17. Does the real evo agree with your numbers?**
+Yes. evo 1.38.1 on our output: evo_ape -a 3.4460 m vs our 3.446; evo_rpe -a --delta 200: 0.2905 vs 0.2906 m.
+evo's rotation APE is larger than our attitude error because evo aligns with the position fit; our attitude
+against ground truth under one constant rotation is 0.3–1.7 deg (tilt and heading) before the failure.
+
+**18. What did the audit change in accuracy?**
+Drone height was flattened by the rotorcraft priors (z std 0.02 m vs 0.49 m true). With a vertical bias model of
+its own: held-out drone ATE 2.37 -> 2.35 m, 1 s RPE 0.351 -> 0.307 m, height correlation 0.26 -> 0.57. On noise
+seeds never used before (7, 2026; all 17 flights) the numbers hold: drone ATE 2.42 vs 3.45 standing still,
+handheld 0.46 vs 1.08.

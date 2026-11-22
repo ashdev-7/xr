@@ -12,10 +12,11 @@ On real EuRoC and TUM-VI IMU data degraded by the organizers' own script, on fli
 
 | | PathGuard | standing still | naive double integration |
 |---|---|---|---|
-| Drone (6 EuRoC flights): ATE | **2.37 m** | 3.20 m | 18,645 m |
-| Drone: blind 5 s after failure | **2.21 m** | 2.89 m | 41,282 m |
-| Handheld (3 TUM-VI rooms): ATE | **0.53 m** | 1.10 m | 644 m |
-| Runtime / estimator heap | **6.2–6.9 ms per 1 s of IMU / 1.7–1.9 MB** | budget: 20 ms / 8 MB | |
+| Drone (6 EuRoC flights): ATE | **2.35 m** | 3.20 m | 18,645 m |
+| Drone: blind 5 s after failure | **2.23 m** | 2.89 m | 41,282 m |
+| Drone: relative error over 1 s (RPE) | **0.31 m** | 0.76 m | 636 m |
+| Handheld (3 TUM-VI rooms): ATE | **0.52 m** | 1.10 m | 644 m |
+| Runtime / memory | **~4–5 ms per 1 s of IMU / 1.6 MB estimator heap, ≤ 3.3 MB worst case (any log length)** | budget: 20 ms / 8 MB | |
 
 ![Top view vs ground truth](figures/top_view.png)
 
@@ -65,8 +66,8 @@ imu0/data.csv
 
 1. **A drone's accelerometer measures its velocity.** A multirotor's thrust acts along one body axis, so the
    specific force perpendicular to it is rotor drag, `f⊥ = −μ v⊥` (Leishman et al. 2014; Abeywardena et al.
-   2013). On EuRoC μ ≈ 0.18 s⁻¹ on every flight, R² up to 0.87. Without it, held-out drone ATE rises from 2.37 to
-   2.97 m. We found no published drag-aided IMU-only result on EuRoC.
+   2013). On EuRoC μ ≈ 0.18 s⁻¹ on every flight, R² up to 0.87. Without it, held-out drone ATE rises from 2.35 to
+   2.94 m. We found no published drag-aided IMU-only result on EuRoC.
 
    ![Rotor drag](figures/rotor_drag.png)
 
@@ -104,7 +105,7 @@ imu0/data.csv
 
 | method | ATE [m] | pre-failure [m] | blind 5 s [m] | dropout [m] | RPE 1 s [m] | RPE 1 s [deg] |
 |---|---|---|---|---|---|---|
-| PathGuard | 2.370 | 2.359 | 2.228 | 2.334 | 0.351 | 0.891 |
+| PathGuard | 2.350 | 2.337 | 2.234 | 2.325 | 0.307 | 0.891 |
 | stand-still | 3.197 | 3.206 | 2.885 | 3.284 | 0.760 | 20.395 |
 | naive integration | 18,645 | 17,227 | 41,282 | 19,877 | 636 | 20.395 |
 
@@ -120,20 +121,20 @@ imu0/data.csv
 
 | configuration | drone | handheld |
 |---|---|---|
-| full | 2.370 / 2.228 | 0.516 / 0.596 |
-| no rotor-drag velocity | 2.959 / 2.921 | 0.516 / 0.596 |
-| no rest detection (ZUPT/ZARU) | 2.409 / 2.259 | 0.516 / 0.596 |
-| no spike repair | 2.370 / 2.228 | 0.511 / 0.594 |
-| no jamming adaptation | 2.392 / 2.387 | 0.497 / 0.664 |
-| no attitude smoother (filter only) | 2.377 / 2.237 | 0.528 / 0.580 |
-| blind: smoother forecast (no hold) | 2.368 / 2.413 | 0.516 / 0.596 |
+| full | 2.350 / 2.234 | 0.516 / 0.596 |
+| no rotor-drag velocity | 2.939 / 2.909 | 0.516 / 0.596 |
+| no rest detection (ZUPT/ZARU) | 2.398 / 2.261 | 0.516 / 0.596 |
+| no spike repair | 2.350 / 2.234 | 0.511 / 0.594 |
+| no jamming adaptation | 3.008 / 4.705 | 0.497 / 0.664 |
+| no attitude smoother (filter only) | 2.360 / 2.253 | 0.528 / 0.580 |
+| blind: smoother forecast (no hold) | 2.348 / 2.414 | 0.516 / 0.596 |
 
 **Resources (single thread, CPython 3.13, Intel laptop CPU)**
 
 | flight | length | ms per 1 s of IMU (budget 20) | heap: estimator data [MB] | heap: worst case, traced from interpreter start incl. parsing the code [MB] |
 |---|---|---|---|---|
-| MH_02_easy | 152 s (29480 rows) | 5.14 | 1.62 | 2.99 |
-| TUMVI_room2 | 144 s (27879 rows) | 4.75 | 1.34 | 2.78 |
+| MH_02_easy | 152 s (29480 rows) | 5.31 | 1.62 | 3.04 |
+| TUMVI_room2 | 144 s (27879 rows) | 4.86 | 1.34 | 2.82 |
 <!-- RESULTS:END -->
 
 ![Error over time](figures/error_over_time.png)
