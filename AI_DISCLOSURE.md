@@ -6,6 +6,7 @@ Team ashdev7 (Yash Tyagi), Thapar Institute of Engineering and Technology, Patia
 | Tool | Role |
 |---|---|
 | Claude Code (Anthropic, Claude Opus 5.5) | Engineering and research assistant: proposed design options, implemented the estimator and tools, ran the experiments, wrote the documentation, figures, deck and bundle generators |
+| Windows text-to-speech (Microsoft Hazel voice) | Narration of the walkthrough video, read from the script in the slide notes (`tools/make_video.ps1`) |
 | ChatGPT (OpenAI) and Gemini (Google) | Independent reviewers of the finished submission (scoring against the rubric, code review). Their findings were checked against the code and measurements before any change; see the last entries of `EXPERIMENTS.md` |
 
 ## How the work was divided
