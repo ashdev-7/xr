@@ -4,7 +4,15 @@
 Samsung PRISM XR Hackathon 2026 · Track 03 · Path Finder: Trajectory Estimation Under Sensor Degradation
 Team **ashdev7** · Thapar Institute of Engineering and Technology, Patiala · Yash Tyagi
 
-**Walkthrough video (2:53):** https://drive.google.com/file/d/1BfyC4fr7hpAaPWFslhgw5UITxz9V0isD/view?usp=sharing · **AI disclosure:** [AI_DISCLOSURE.md](AI_DISCLOSURE.md)
+**Submission package** (everything in this repository):
+
+| Item | Where |
+|---|---|
+| Walkthrough video (2:53) | [submission/PathGuard_walkthrough_video.mp4](submission/PathGuard_walkthrough_video.mp4) · also on [Google Drive](https://drive.google.com/file/d/1BfyC4fr7hpAaPWFslhgw5UITxz9V0isD/view?usp=sharing) |
+| Submission bundle (estimated_trajectory.txt, metadata.json, src/) | [submission/ThaparInstituteOfEngineeringAndTechnology_ashdev7.zip](submission/ThaparInstituteOfEngineeringAndTechnology_ashdev7.zip) |
+| Presentation | [submission/ThaparInstituteOfEngineeringAndTechnology_ashdev7.pptx](submission/ThaparInstituteOfEngineeringAndTechnology_ashdev7.pptx) |
+| Source code | [src/main.py](src/main.py) (standalone) · readable stages in [src/stages/](src/stages/) |
+| AI disclosure | [AI_DISCLOSURE.md](AI_DISCLOSURE.md) |
 
 PathGuard turns a degraded IMU log (EuRoC `imu0/data.csv`) into a 6-DoF trajectory with exactly one pose per
 IMU row, including the 5 s after the IMU fails. The whole estimator is one **pure-Python, standard-library-only**
