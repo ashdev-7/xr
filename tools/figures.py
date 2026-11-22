@@ -79,6 +79,30 @@ def fig_topview(flights=("MH_02_easy", "V1_02_medium", "TUMVI_room2"), scen="awa
     fig.tight_layout(); fig.savefig(os.path.join(OUT, "top_view.png")); plt.close(fig)
 
 
+def fig_topview_vertical(flights=("MH_02_easy", "V1_02_medium", "TUMVI_room2"), scen="aware_s42"):
+    """Deck version: the three top views stacked in one column (drawn at the size they are shown, 4.5 x 4.5 in)."""
+    fig, axs = plt.subplots(len(flights), 1, figsize=(4.5, 4.5))
+    for ax, fl in zip(axs, flights):
+        pg_ = os.path.join(ROOT, "results", "rep_pg", f"{fl}__{scen}.txt")
+        st_ = os.path.join(ROOT, "results", "rep_still", f"{fl}__{scen}.txt")
+        if not os.path.exists(pg_):
+            continue
+        t, pe, p = aligned(pg_, fl)
+        ax.plot(p[:, 0], p[:, 1], color=C_GT, lw=1.1, label="ground truth")
+        ax.plot(pe[:, 0], pe[:, 1], color=C_PG, lw=1.1, label="PathGuard")
+        if os.path.exists(st_):
+            _, ps, _ = aligned(st_, fl)
+            ax.plot(ps[:1, 0], ps[:1, 1], "o", color=C_ST, ms=6, label="stand-still")
+        e = np.sqrt(np.mean(np.sum((pe - p) ** 2, 1)))
+        name = fl.replace("TUMVI_", "TUM-VI ").replace("_", " ")
+        ax.set_title(f"{name}   ATE {e:.2f} m", fontsize=10, loc="left", pad=3)
+        ax.set_aspect("equal", "datalim"); ax.tick_params(labelsize=8.5)
+        ax.set_ylabel("y [m]", fontsize=9)
+    axs[-1].set_xlabel("x [m]", fontsize=9)
+    axs[0].legend(fontsize=8.5, frameon=False, loc="center left", bbox_to_anchor=(1.0, 0.5))
+    fig.tight_layout(h_pad=0.6); fig.savefig(os.path.join(OUT, "top_view_vertical.png"), dpi=300); plt.close(fig)
+
+
 def fig_drag(flight="MH_02_easy", t_air=40):
     a = np.loadtxt(os.path.join(ROOT, "data", "raw", "euroc", flight, "imu0.csv"), delimiter=",", comments="#")
     g = np.loadtxt(os.path.join(ROOT, "data", "raw", "euroc", flight, "gt.csv"), delimiter=",", comments="#")
@@ -123,7 +147,7 @@ def fig_error_time(flight="MH_02_easy", scen="aware_s42"):
 
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
-    for fn in (fig_degradation, fig_topview, fig_drag, fig_error_time):
+    for fn in (fig_degradation, fig_topview, fig_topview_vertical, fig_drag, fig_error_time):
         try:
             fn(); print("ok", fn.__name__)
         except Exception as e:  # keep going; report which figure failed

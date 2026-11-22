@@ -20,7 +20,7 @@ MONO = "Consolas"
 
 
 def tb(slide, x, y, w, h, paras, size=12, color=TXT, font="Calibri", align=PP_ALIGN.LEFT, anchor=MSO_ANCHOR.TOP, space=4):
-    """paras: list of paragraphs; each paragraph is a str or a list of (text, bold, color|None) runs."""
+    """paras: list of paragraphs; each paragraph is a str or a list of (text, bold, color|None[, url]) runs."""
     box = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
     tf = box.text_frame; tf.word_wrap = True; tf.vertical_anchor = anchor
     tf.margin_left = tf.margin_right = Inches(0.02); tf.margin_top = tf.margin_bottom = Inches(0.02)
@@ -28,10 +28,13 @@ def tb(slide, x, y, w, h, paras, size=12, color=TXT, font="Calibri", align=PP_AL
         para = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
         para.alignment = align; para.space_after = Pt(space)
         for r in ([(p, False, None)] if isinstance(p, str) else p):
-            text, bold, col = (r + (None,))[:3] if isinstance(r, tuple) else (r, False, None)
+            text, bold, col, url = (r + (None, None))[:4] if isinstance(r, tuple) else (r, False, None, None)
             run = para.add_run(); run.text = text
             run.font.size = Pt(size); run.font.name = font; run.font.bold = bold
-            run.font.color.rgb = col or color
+            if url:  # clickable; underlined in the accent colour so it reads as a link on the dark template
+                run.hyperlink.address = url
+                run.font.underline = True
+            run.font.color.rgb = (ACC if url else None) or col or color
     return box
 
 
@@ -150,7 +153,7 @@ def main():
         elif t.startswith("Members"):
             set_runs(sh, [f"Members: {a.members}"], size=13)
             sh.left = Inches(0.55); sh.top = Inches(3.75); sh.width = Inches(6.0)
-    tb(s, 0.55, 4.55, 8.5, 0.6, [[("Code: ", True, ACC), (a.repo, False, TXT)],
+    tb(s, 0.55, 4.55, 8.5, 0.6, [[("Code: ", True, ACC), (a.repo, False, TXT, a.repo)],
                                  f"Pure Python, standard library only · {max(r['ms_per_s'] for r in rs):.1f} ms per 1 s of IMU "
                                  f"(budget 20) · {max(r['data_heap_mb'] for r in rs):.1f} MB heap (budget 8)"], size=11, color=MUTED)
 
@@ -232,11 +235,10 @@ def main():
     tb(s, 0.4, 4.15, 4.6, 1.1, [
         f"Drones: {100 * (1 - rot_pg / rot_st):.0f} % lower ATE and {100 * (1 - rot_bl_pg / rot_bl_st):.0f} % lower blind-window "
         f"error than standing still; handheld: {100 * (1 - hh_pg / hh_st):.0f} % lower ATE.",
-        "Real public IMU degraded by the official script, 2 column scenarios × 3 seeds, flights held out during design and tuning (one handheld parameter was refit on all rooms at the end)."],
+        "Real public IMU degraded by the official script, 2 column scenarios × 3 seeds, flights held out during design and tuning (one handheld parameter was refit on all rooms at the end).",
+        "Right: top view vs ground truth. The machine hall (top) shows our main limitation: slow, large excursions are under-estimated."],
         size=9, color=MUTED, space=4)
-    pic(s, "top_view.png", 5.15, 1.1, w=4.6)
-    tb(s, 5.15, 2.85, 4.6, 0.6, ["Top view vs ground truth. Machine hall (left) shows our main limitation: slow, "
-                                 "large excursions are under-estimated."], size=9, color=MUTED)
+    pic(s, "top_view_vertical.png", 5.2, 1.0, h=4.5)
 
     # ---------------- 6 differentiation
     s = S[5]
@@ -254,7 +256,7 @@ def main():
 
     # ---------------- 7 demo & setup
     s = S[6]
-    tb(s, 0.4, 1.05, 9.2, 0.35, [[("Repository  ", True, ACC), (a.repo, False, TXT)]], size=12)
+    tb(s, 0.4, 1.05, 9.2, 0.35, [[("Repository  ", True, ACC), (a.repo, False, TXT, a.repo)]], size=12)
     cmds = ["# run (Python ≥ 3.8, nothing to install)",
             "python src/main.py <imu0/data.csv | dataset folder | .zip> estimated_trajectory.txt",
             "python src/main.py sample/imu0/data.csv out.txt --verbose=1     # platform, jamming, integrity log",
@@ -266,7 +268,9 @@ def main():
             "# verify",
             "python tests/test_contract.py      # 18 input variants: one pose per row, exact timestamps",
             "python tests/test_eskf.py          # attitude filter recovers a known gyro bias",
-            "python tools/bench/report.py       # regenerates every number in the README and this deck"]
+            "python tools/bench/report.py       # regenerates every number in the README and this deck",
+            "python tools/qa/break_it.py        # 52 adversarial inputs: contract, memory, runtime, accuracy",
+            "evo_ape tum gt.tum estimated_trajectory.txt -a   # organizers' metric; matches our scorer to 4 decimals"]
     tb(s, 0.4, 1.5, 9.2, 3.6, cmds, size=9.5, font=MONO, color=TXT, space=1)
     tb(s, 0.4, 5.0, 9.2, 0.35, ["CI builds the Docker image and runs the tests on Python 3.8–3.13 on every push."], size=9, color=MUTED)
 
@@ -292,11 +296,20 @@ def main():
 
     # ---------------- 9 thank you
     s = S[8]
-    tb(s, 1.55, 3.25, 6.0, 0.8, [[(f"Team {a.team}  ·  {a.members}", True, ACC)], a.repo], size=13, align=PP_ALIGN.CENTER, color=TXT)
+    tb(s, 1.55, 3.25, 6.0, 0.8, [[(f"Team {a.team}  ·  {a.members}", True, ACC)], [(a.repo, False, TXT, a.repo)]], size=13, align=PP_ALIGN.CENTER, color=TXT)
 
     name = "".join(w[:1].upper() + w[1:] for w in a.college.split(",")[0].split())
     out = a.out or os.path.join(ROOT, "dist", f"{name}_{a.team}.pptx")
     os.makedirs(os.path.dirname(out), exist_ok=True)
+    # hyperlink colour comes from the theme (not the run): make links the accent cyan, readable on the dark template
+    import re
+    from pptx.opc.constants import RELATIONSHIP_TYPE as RT
+    for m in prs.slide_masters:
+        th = m.part.part_related_by(RT.THEME)
+        xml = th.blob.decode("utf-8")
+        for tag in ("hlink", "folHlink"):
+            xml = re.sub(rf"<a:{tag}>.*?</a:{tag}>", f'<a:{tag}><a:srgbClr val="29B6F6"/></a:{tag}>', xml, flags=re.S)
+        th._blob = xml.encode("utf-8")
     prs.save(out)
     print("deck:", out)
 
