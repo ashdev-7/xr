@@ -355,3 +355,38 @@ embedded raw strings, compiled one at a time into its namespace. tests/test_buil
 drifts from the stages. Bit-identical on the 7 reference inputs; main.py alone in another folder, Python 3.10, -I:
 bit-identical. Worst-case traced peak 2.96 / 3.23 MB (3.13), 2.30 / 2.26 MB (3.10); 3.9 ms per s of IMU.
 Bundle layout fixed to the template: estimated_trajectory.txt, metadata.json and src/ at the zip root.
+
+## 2026-11-22 — adversarial QA round 1 (tools/qa/break_it.py): defects found and fixed
+Passed unchanged: IMU mount rotated 90 deg / arbitrary (drone ATE 3.837 / 3.838 vs 3.837; handheld 0.345 / 0.350),
+clock starting at 1 ns (identical), extra columns, scientific notation, swapped rows, cp1252 header bytes, no final
+newline, zip with spaces/unicode/__MACOSX, 10 s dead start, clock jump/reset (contract), degenerate files
+(empty, header only, 1/3 rows, all zero, all NaN -> stand-still, contract holds). Peak traced heap 2.5-3.8 MB.
+Defects (all fixed, standard inputs bit-identical afterwards except a 4-decimal-identical room6 gap variant):
+1. Noise meter (median |2nd difference|) collapses to ~0 on interpolated/duplicated/quantised data -> spike
+   detector deleted 94 % of a 400 Hz upsampled log (ATE at stand-still level). Fix: exact-zero 2nd differences
+   are excluded (not sensor noise).
+2. Column order trusted header names over physics: "acceleration_*, angular_velocity_*" (both start with 'a')
+   on accel-first data -> handheld ATE 5.8 m (worse than stand-still). Fix: the triple with median |.| ~ 9.81 m/s^2
+   (or ~1 g) is the accelerometer whenever that is unambiguous; header names only otherwise.
+3. Time origin = first row: a corrupted first timestamp (0 or +11 days) made every row invalid -> stand-still.
+   Fix: origin = first timestamp followed by 5 steadily advancing ones.
+4. Tab/semicolon delimiters: rows unreadable (semicolon: 0 poses, contract failure). Fix: rows without commas are
+   split on ';' or whitespace (survey, ingest, output, fallback).
+5. Zip text without errors="replace" (non-UTF-8 would crash estimator and fallback); zip picker could select a
+   __MACOSX/._*.csv file. Fixed. Fallback writer: integer timestamps always ns (EuRoC).
+6. Dead code: t10 in the translation covariance propagation (F C F' verified term by term; output identical).
+Limitation (documented, not a bug): a 10 s signal loss on handheld data -> ATE 0.35 -> 0.99 m (stand-still 1.22);
+heading cannot be re-acquired from an IMU after 10 s without data. Spec dropouts are <= 2 s.
+
+## 2026-11-22 — evo cross-check and the flattened-height finding (kept)
+Real evo 1.38.1 on the bundle trajectory (MH_01 stand-in): evo_ape -a 3.4460 = ours 3.446; evo_rpe -a --delta 200
+0.2905 = ours 0.2906 (rotation 0.53 vs 0.55 deg); evo reads the file without warnings (duplicate timestamps ok).
+evo_ape -r angle_deg 40.8 deg although our attitude vs truth under a best constant rotation is 0.3-1.7 deg: evo
+aligns with the position fit, which tilted our drone trajectories 15-35 deg on MH flights (166 deg on V2_01).
+Cause: drone height was flat (z std 0.01-0.03 m vs 0.22-1.04 m true, corr 0.1-0.4); handheld fine (corr 0.5-0.9).
+Rotor preset suppressed vertical motion through tight vertical priors (sig_v_z 0.1, sig_p_z 0.5), the horizontal
+bias random walk (0.04, tuned to absorb drag errors) applied to z, and sig_a 0.4. TRAIN sweep (5 drone flights x 2
+scen): priors only z std 0.018 -> 0.155; + vertical bias RW 5e-4 (+0.01/severity) and sig_a 0.1: z std 0.229,
+corr 0.55, ATE 2.466 -> 2.454. Held-out (6 flights x 2 scen x 3 seeds): ATE 2.370 -> 2.350, pre-failure 2.359 ->
+2.337, dropout 2.334 -> 2.325, blind 2.228 -> 2.234, RPE 1 s 0.351 -> 0.307 m (-12.5 %), z corr 0.26 -> 0.57,
+alignment tilt 15.4 -> 11.4 deg. Adopted in the rotorcraft preset (ba_rw_z / ba_k_z are new parameters).

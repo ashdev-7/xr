@@ -51,6 +51,8 @@ P = dict(
     ba_rw=5e-4,         # base accel bias random walk [m/s^2/sqrt(s)]
     ba_k=0.01,          # extra accel bias RW per unit severity [m/s^2/sqrt(s)] (script: 0.01 aware)
     ba_kz=0.015,        # extra vertical bias RW per unit severity (1.5e-3 scale drift x g)
+    ba_rw_z=-1.0,       # vertical accel bias RW [m/s^2/sqrt(s)]; < 0: same as horizontal (ba_rw)
+    ba_k_z=0.0,         # vertical: extra bias RW per unit severity (used when ba_rw_z >= 0)
     sig_c=0.2,          # workspace-centre random walk [m/sqrt(s)]
     sig_v_h=0.3,        # speed prior, horizontal [m/s]
     sig_v_z=0.1,        # speed prior, vertical [m/s]
@@ -82,8 +84,11 @@ P = dict(
 # Motion priors learned per platform class on TRAIN flights (tools/bench/tune.py). Rotor vibration makes
 # the class unambiguous: median accel noise 0.5-1.0 m/s^2 on EuRoC MAV, ~0.03 on handheld TUM-VI.
 PRESETS = {
-    1: dict(sig_v_h=4.0, sig_p_h=10.0, sig_a=0.4, ba_rw=0.04, ba_k=0.04, sig_c=0.05, tilt_sig=0.25, tilt_k=2.0,
-            sig_gap=6.0, bg0_sig=0.005, blind_tau=0.0),  # rotorcraft (tuned on MH_01/03/05, V1_01, V2_02)
+    1: dict(sig_v_h=4.0, sig_p_h=10.0, sig_a=0.1, ba_rw=0.04, ba_k=0.04, sig_c=0.05, tilt_sig=0.25, tilt_k=2.0,
+            sig_gap=6.0, bg0_sig=0.005, blind_tau=0.0,
+            # vertical: no drag measurement disciplines it, so it gets a physical bias random walk and loose priors
+            # (QA audit: height was flattened, z std 0.02 m vs 0.49 m true; held-out RPE 1 s 0.351 -> 0.307 m)
+            sig_v_z=1.0, sig_p_z=5.0, ba_rw_z=0.0005, ba_k_z=0.01),  # rotorcraft (tuned on MH_01/03/05, V1_01, V2_02)
     0: dict(sig_v_h=1.96, sig_p_h=1.5, sig_a=0.05, ba_rw=0.02, ba_k=0.028, sig_c=0.1, tilt_sig=0.25,
             bg0_sig=0.005),  # handheld (tuned on room1/3/5, validated on room2/4/6; final refit on all six: sig_a 0.1 -> 0.05)
 }
@@ -119,12 +124,12 @@ def resolve_input(arg):
         import io
         import zipfile  # imported only for zip input (the module alone costs ~1 MB of heap)
         z = zipfile.ZipFile(arg)
-        names = [n for n in z.namelist() if n.endswith("imu0/data.csv")] or \
-                [n for n in z.namelist() if n.endswith(".csv")]
+        real = [n for n in z.namelist() if "__MACOSX/" not in n and not n.rsplit("/", 1)[-1].startswith("._")]
+        names = [n for n in real if n.endswith("imu0/data.csv")] or [n for n in real if n.lower().endswith(".csv")]
         if not names:
             raise SystemExit(f"no csv in {arg}")
         n = sorted(names, key=len)[0]
-        return (lambda: io.TextIOWrapper(zipfile.ZipFile(arg).open(n), encoding="utf-8-sig", newline=None)), arg + ":" + n
+        return (lambda: io.TextIOWrapper(zipfile.ZipFile(arg).open(n), encoding="utf-8-sig", errors="replace", newline=None)), arg + ":" + n
     return (lambda: open(arg, "r", newline=None, encoding="utf-8-sig", errors="replace")), arg
 
 
@@ -157,6 +162,7 @@ def survey(opener, nmax=4000):
     first_ts = first_tsf = prev = None
     is_int = True
     dts, n13, n46 = [], [], []
+    head_ts = []
     with opener() as f:
         for line in f:
             s = line.strip()
@@ -164,8 +170,12 @@ def survey(opener, nmax=4000):
                 continue
             if not (s[0].isdigit() or s[0] in "+-."):
                 if header is None and rows == 0:
-                    header = s
+                    header = s if ("," in s or ";" not in s) else s.replace(";", ",")
+                    if "," not in header:
+                        header = ",".join(header.split())
                 continue
+            if "," not in s:  # tolerate ';' or tab/whitespace delimiters (EuRoC uses ',')
+                s = s.replace(";", ",") if ";" in s else ",".join(s.split())
             if " " in s or "\t" in s:
                 s = s.replace(" ", "").replace("\t", "")
             parts = s.split(",")
@@ -176,8 +186,8 @@ def survey(opener, nmax=4000):
             rows += 1
             if ti is None:
                 is_int = False
-            if rows == 1:
-                first_ts, first_tsf = ti, tf
+            if len(head_ts) < 64:
+                head_ts.append((ti, tf))
             cur = ti if ti is not None else tf
             if prev is not None and cur > prev:
                 dts.append(cur - prev)
@@ -199,6 +209,14 @@ def survey(opener, nmax=4000):
     md = dts[len(dts) // 2] if dts else 1
     tscale = 1.0 if md < 1.0 else 1e-3 if md < 1e3 else 1e-6 if md < 1e6 else 1e-9
     dt_nom = md * tscale if dts else 0.005
+    vals = [ti if ti is not None else tf for ti, tf in head_ts]
+    k0 = 0
+    for i in range(len(vals)):
+        nxt = vals[i:i + 6]
+        if len(nxt) == 6 and all(0 <= (b - a) * tscale <= 0.5 for a, b in zip(nxt[:-1], nxt[1:])):
+            k0 = i
+            break
+    first_ts, first_tsf = head_ts[k0]
     # column layout: header names first, gravity magnitude as fallback
     gyro_first = True
     if header:
@@ -210,7 +228,19 @@ def survey(opener, nmax=4000):
         elif kind(h[1]) == "a" and kind(h[4]) == "g":
             gyro_first = False
     med = lambda x: sorted(x)[len(x) // 2] if x else 0.0
-    if not header and n13:  # the accelerometer triple carries gravity (~9.8 m/s^2 or ~1 g)
+    # Physics decides when it is unambiguous: the accelerometer triple has a median magnitude of ~9.81 m/s^2
+    # (or ~1 g); header names are used only when the magnitudes cannot tell (e.g. a gyro median near 1 rad/s)
+    phys = None
+    if n13:
+        m13, m46 = med(n13), med(n46)
+        near = lambda m, g, tol: abs(m - g) <= tol
+        if near(m46, 9.80665, 1.5) != near(m13, 9.80665, 1.5) and not (near(m13, 9.80665, 3.0) and near(m46, 9.80665, 3.0)):
+            phys = near(m46, 9.80665, 1.5)
+        elif near(m46, 1.0, 0.15) != near(m13, 1.0, 0.15) and not (near(m13, 1.0, 0.5) and near(m46, 1.0, 0.5)):
+            phys = near(m46, 1.0, 0.15)
+    if phys is not None:
+        gyro_first = phys
+    elif not header and n13:  # weak evidence: the closer triple to gravity
         gs = lambda m: min(abs(m - 9.80665), abs(m - 1.0) * 9.80665)
         gyro_first = gs(med(n46)) <= gs(med(n13))
     ma = med(n46) if gyro_first else med(n13)
@@ -282,6 +312,8 @@ def ingest(opener, info):
             s = line.strip()
             if not s or not (s[0].isdigit() or s[0] in "+-."):
                 continue
+            if "," not in s:  # tolerate ';' or tab/whitespace delimiters (EuRoC uses ',')
+                s = s.replace(";", ",") if ";" in s else ",".join(s.split())
             if " " in s or "\t" in s:
                 s = s.replace(" ", "").replace("\t", "")
             parts = s.split(",")
@@ -355,6 +387,9 @@ def ingest(opener, info):
 
 
 def _mad_sigma(x):
+    """Robust white-noise sigma from |second differences|. Exact zeros are dropped: they come from interpolated,
+    duplicated or quantised samples, not from sensor noise (a median of zeros would make every sample a spike)."""
+    x = [v for v in x if v > 0.0]
     if len(x) < 30:
         return -1.0
     x.sort()
@@ -977,7 +1012,8 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
         sv = sev_at(tj) if adapt else 0.0
         qb = P["ba_rw"] + P["ba_k"] * sv
         qbh_[j] = qb * qb * dt
-        qbz_[j] = (qb * qb + (P["ba_kz"] * sv) ** 2) * dt
+        qbv = (P["ba_rw_z"] + P["ba_k_z"] * sv) if P["ba_rw_z"] >= 0 else qb  # vertical: own bias random walk
+        qbz_[j] = (qbv * qbv + (P["ba_kz"] * sv) ** 2) * dt
     qc = P["sig_c"] ** 2 * dt
     g0, g1 = h, dt
     rz = P["zupt_sig"] ** 2
@@ -1040,7 +1076,6 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
                 t00 = c00 + dt * c01 - h * c02; t01 = c01 + dt * c11 - h * c12; t02 = c02 + dt * c12 - h * c22
                 t03 = c03 + dt * c13 - h * c23
                 t11 = c11 - dt * c12; t12 = c12 - dt * c22; t13 = c13 - dt * c23
-                t10 = c01 - dt * c02
                 n00 = t00 + dt * t01 - h * t02
                 n01 = t01 - dt * t02
                 n02 = t02
@@ -1184,6 +1219,8 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL=(0.0,
                 c = s[0]
                 if not (c.isdigit() or c in "+-."):
                     continue
+                if "," not in s:  # tolerate ';' or tab/whitespace delimiters (EuRoC uses ',')
+                    s = s.replace(";", ",") if ";" in s else ",".join(s.split())
                 k = s.find(",")
                 tok = (s[:k] if k >= 0 else s).strip()
                 try:  # parse_ts, inlined (hot loop)
@@ -1399,13 +1436,15 @@ def fallback(inp, out):
             s = line.strip()
             if not s or not (s[0].isdigit() or s[0] in "+-."):
                 continue
+            if "," not in s:
+                s = s.replace(";", ",") if ";" in s else ",".join(s.split())
             tok = s.split(",", 1)[0].strip()
             try:
                 ti, tf = parse_ts(tok)
             except ValueError:
                 continue
-            if ti is not None and ti >= 10**12:  # nanoseconds
-                ds = str(ti)
+            if ti is not None and ti >= 0:  # integer timestamps are nanoseconds (EuRoC format)
+                ds = str(ti).rjust(10, "0")
                 ts_s = ds[:-9] + "." + ds[-9:]
             else:
                 ts_s = tok

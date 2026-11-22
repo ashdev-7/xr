@@ -40,6 +40,8 @@ def write_output(opener, info, out_path, qs, nb, pos, vel, K, kdt, T_L, wL=(0.0,
                 c = s[0]
                 if not (c.isdigit() or c in "+-."):
                     continue
+                if "," not in s:  # tolerate ';' or tab/whitespace delimiters (EuRoC uses ',')
+                    s = s.replace(";", ",") if ";" in s else ",".join(s.split())
                 k = s.find(",")
                 tok = (s[:k] if k >= 0 else s).strip()
                 try:  # parse_ts, inlined (hot loop)

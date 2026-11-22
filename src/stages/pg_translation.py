@@ -95,7 +95,8 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
         sv = sev_at(tj) if adapt else 0.0
         qb = P["ba_rw"] + P["ba_k"] * sv
         qbh_[j] = qb * qb * dt
-        qbz_[j] = (qb * qb + (P["ba_kz"] * sv) ** 2) * dt
+        qbv = (P["ba_rw_z"] + P["ba_k_z"] * sv) if P["ba_rw_z"] >= 0 else qb  # vertical: own bias random walk
+        qbz_[j] = (qbv * qbv + (P["ba_kz"] * sv) ** 2) * dt
     qc = P["sig_c"] ** 2 * dt
     g0, g1 = h, dt
     rz = P["zupt_sig"] ** 2
@@ -158,7 +159,6 @@ def translation(asum, cnt, nb, qs, T_L, T_end):
                 t00 = c00 + dt * c01 - h * c02; t01 = c01 + dt * c11 - h * c12; t02 = c02 + dt * c12 - h * c22
                 t03 = c03 + dt * c13 - h * c23
                 t11 = c11 - dt * c12; t12 = c12 - dt * c22; t13 = c13 - dt * c23
-                t10 = c01 - dt * c02
                 n00 = t00 + dt * t01 - h * t02
                 n01 = t01 - dt * t02
                 n02 = t02

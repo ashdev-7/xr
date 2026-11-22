@@ -10,6 +10,7 @@ def survey(opener, nmax=4000):
     first_ts = first_tsf = prev = None
     is_int = True
     dts, n13, n46 = [], [], []
+    head_ts = []
     with opener() as f:
         for line in f:
             s = line.strip()
@@ -17,8 +18,12 @@ def survey(opener, nmax=4000):
                 continue
             if not (s[0].isdigit() or s[0] in "+-."):
                 if header is None and rows == 0:
-                    header = s
+                    header = s if ("," in s or ";" not in s) else s.replace(";", ",")
+                    if "," not in header:
+                        header = ",".join(header.split())
                 continue
+            if "," not in s:  # tolerate ';' or tab/whitespace delimiters (EuRoC uses ',')
+                s = s.replace(";", ",") if ";" in s else ",".join(s.split())
             if " " in s or "\t" in s:
                 s = s.replace(" ", "").replace("\t", "")
             parts = s.split(",")
@@ -29,8 +34,8 @@ def survey(opener, nmax=4000):
             rows += 1
             if ti is None:
                 is_int = False
-            if rows == 1:
-                first_ts, first_tsf = ti, tf
+            if len(head_ts) < 64:
+                head_ts.append((ti, tf))
             cur = ti if ti is not None else tf
             if prev is not None and cur > prev:
                 dts.append(cur - prev)
@@ -52,6 +57,14 @@ def survey(opener, nmax=4000):
     md = dts[len(dts) // 2] if dts else 1
     tscale = 1.0 if md < 1.0 else 1e-3 if md < 1e3 else 1e-6 if md < 1e6 else 1e-9
     dt_nom = md * tscale if dts else 0.005
+    vals = [ti if ti is not None else tf for ti, tf in head_ts]
+    k0 = 0
+    for i in range(len(vals)):
+        nxt = vals[i:i + 6]
+        if len(nxt) == 6 and all(0 <= (b - a) * tscale <= 0.5 for a, b in zip(nxt[:-1], nxt[1:])):
+            k0 = i
+            break
+    first_ts, first_tsf = head_ts[k0]
     # column layout: header names first, gravity magnitude as fallback
     gyro_first = True
     if header:
@@ -63,7 +76,19 @@ def survey(opener, nmax=4000):
         elif kind(h[1]) == "a" and kind(h[4]) == "g":
             gyro_first = False
     med = lambda x: sorted(x)[len(x) // 2] if x else 0.0
-    if not header and n13:  # the accelerometer triple carries gravity (~9.8 m/s^2 or ~1 g)
+    # Physics decides when it is unambiguous: the accelerometer triple has a median magnitude of ~9.81 m/s^2
+    # (or ~1 g); header names are used only when the magnitudes cannot tell (e.g. a gyro median near 1 rad/s)
+    phys = None
+    if n13:
+        m13, m46 = med(n13), med(n46)
+        near = lambda m, g, tol: abs(m - g) <= tol
+        if near(m46, 9.80665, 1.5) != near(m13, 9.80665, 1.5) and not (near(m13, 9.80665, 3.0) and near(m46, 9.80665, 3.0)):
+            phys = near(m46, 9.80665, 1.5)
+        elif near(m46, 1.0, 0.15) != near(m13, 1.0, 0.15) and not (near(m13, 1.0, 0.5) and near(m46, 1.0, 0.5)):
+            phys = near(m46, 1.0, 0.15)
+    if phys is not None:
+        gyro_first = phys
+    elif not header and n13:  # weak evidence: the closer triple to gravity
         gs = lambda m: min(abs(m - 9.80665), abs(m - 1.0) * 9.80665)
         gyro_first = gs(med(n46)) <= gs(med(n13))
     ma = med(n46) if gyro_first else med(n13)
@@ -135,6 +160,8 @@ def ingest(opener, info):
             s = line.strip()
             if not s or not (s[0].isdigit() or s[0] in "+-."):
                 continue
+            if "," not in s:  # tolerate ';' or tab/whitespace delimiters (EuRoC uses ',')
+                s = s.replace(";", ",") if ";" in s else ",".join(s.split())
             if " " in s or "\t" in s:
                 s = s.replace(" ", "").replace("\t", "")
             parts = s.split(",")
@@ -208,6 +235,9 @@ def ingest(opener, info):
 
 
 def _mad_sigma(x):
+    """Robust white-noise sigma from |second differences|. Exact zeros are dropped: they come from interpolated,
+    duplicated or quantised samples, not from sensor noise (a median of zeros would make every sample a spike)."""
+    x = [v for v in x if v > 0.0]
     if len(x) < 30:
         return -1.0
     x.sort()
